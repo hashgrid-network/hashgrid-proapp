@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Golden Hexagon Mining Core Outer Ring -->
+    <path
+        android:fillColor="#151D2A"
+        android:strokeColor="#F59E0B"
+        android:strokeWidth="3.0"
+        android:pathData="M54,22 L82,38 L82,70 L54,86 L26,70 L26,38 Z" />
+
+    <!-- Inner Grid Network Lines -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#10B981"
+        android:strokeWidth="2.0"
+        android:pathData="M54,22 L54,86 M26,38 L82,70 M26,70 L82,38" />
+
+    <!-- Center Quantum Core -->
+    <path
+        android:fillColor="#FBBF24"
+        android:pathData="M54,42 L64,48 L64,60 L54,66 L44,60 L44,48 Z" />
+
+    <!-- Glowing Node Connectors -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M54,19 A3,3 0 1,1 54,25 A3,3 0 1,1 54,19" />
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M82,35 A3,3 0 1,1 82,41 A3,3 0 1,1 82,35" />
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M82,67 A3,3 0 1,1 82,73 A3,3 0 1,1 82,67" />
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M54,83 A3,3 0 1,1 54,89 A3,3 0 1,1 54,83" />
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M26,67 A3,3 0 1,1 26,73 A3,3 0 1,1 26,67" />
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M26,35 A3,3 0 1,1 26,41 A3,3 0 1,1 26,35" />
+
+    <!-- Center G Letter / Pickaxe Accent -->
+    <path
+        android:fillColor="#0A0D14"
+        android:pathData="M52,48 L58,48 L58,51 L55,51 L55,57 L58,57 L58,54 L56.5,54 L56.5,52.5 L60,52.5 L60,59 L52,59 Z" />
+</vector>

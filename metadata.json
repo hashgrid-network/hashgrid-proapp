@@ -1,0 +1,6 @@
+{
+  "name": "HashGrid Pro",
+  "description": "Enterprise Cloud Mining & Institutional Node Network Platform",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
