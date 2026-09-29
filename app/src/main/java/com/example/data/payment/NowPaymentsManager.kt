@@ -22,10 +22,10 @@ class NowPaymentsManager {
         const val API_KEY = "EAY3NQY-F3CMX5H-GFCS1A4-1EWV2DE"
         const val IPN_SECRET_KEY = "ehhov/9+V7jelfnStlVL25+/PdoAaWar"
         const val BASE_URL = "https://api.nowpayments.io/v1"
-        const val IPN_CALLBACK_URL = "https://hashgrid-b850b.firebaseapp.com/api/ipn"
+        const val IPN_CALLBACK_URL = "https://hashgrid-c7fe4.firebaseapp.com/api/ipn"
     }
 
-    private val client = OkHttpClient.Builder()
+    val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)

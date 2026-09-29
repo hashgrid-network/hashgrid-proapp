@@ -39,7 +39,16 @@ data class UserMiningState(
     val transactions: List<TransactionItem> = emptyList(),
     val spinHistory: List<SpinHistoryRecord> = emptyList(),
     val microTasks: List<MicroTaskSubmission> = emptyList(),
-    val videoPromotions: List<VideoPromotionSubmission> = emptyList()
+    val videoPromotions: List<VideoPromotionSubmission> = emptyList(),
+
+    // Web3 Security & Persistence
+    val secretKey: String = "",
+    val isKeyBackedUp: Boolean = false,
+    val isPinConfigured: Boolean = false,
+    val isBiometricEnabled: Boolean = false,
+    val isAppLocked: Boolean = false,
+    val lastYieldTickTimestamp: Long = 0L,
+    val createdAt: Long = System.currentTimeMillis()
 ) {
     // Referral boost calculation: +0.25 per registration, +0.50 per active miner
     val referralBoostHashrateGh: Double

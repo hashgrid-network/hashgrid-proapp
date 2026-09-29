@@ -107,21 +107,74 @@ fun HomeScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // Two Column Balances
+                    // Total Estimated Portfolio Value Header
+                    val gridPreLaunchUsdValue = userState.gridBalance * 0.05
+                    val totalPortfolioUsd = userState.minerBalanceUsdt + gridPreLaunchUsdValue
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        Column {
+                            Text(
+                                text = "ESTIMATED TOTAL PORTFOLIO",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = TextMuted,
+                                    fontSize = 9.sp,
+                                    letterSpacing = 0.5.sp
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "$${String.format("%,.2f", totalPortfolioUsd)} USD",
+                                style = MaterialTheme.typography.headlineLarge.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                            )
+                        }
+
+                        // Pre-launch rate tag
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(CyanAccent.copy(alpha = 0.15f))
+                                .border(1.dp, CyanAccent.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "PRE-LAUNCH: $0.05 / GRID",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyanAccent,
+                                    fontSize = 9.sp
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Two Column Balances
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkNavySurface.copy(alpha = 0.6f))
+                            .padding(12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         // Miner Balance USDT
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Miner Balance (USDT)",
-                                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary)
+                                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.5.sp)
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "$${String.format("%.2f", userState.minerBalanceUsdt)}",
-                                style = MaterialTheme.typography.headlineLarge.copy(
+                                style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.ExtraBold,
                                     color = GoldLight
                                 )
@@ -130,7 +183,7 @@ fun HomeScreen(
                                 text = "≈ Withdrawable Funds",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = TextEmerald,
-                                    fontSize = 9.5.sp
+                                    fontSize = 9.sp
                                 )
                             )
                         }
@@ -139,31 +192,51 @@ fun HomeScreen(
                         Box(
                             modifier = Modifier
                                 .width(1.dp)
-                                .height(48.dp)
+                                .height(44.dp)
                                 .background(Color(0xFF334155))
                         )
 
-                        Spacer(modifier = Modifier.width(16.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
 
                         // GRID Coin Balance
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "GRID Coin Balance",
-                                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary)
-                            )
+                        Column(modifier = Modifier.weight(1.1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "GRID Balance",
+                                    style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.5.sp)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(CyanAccent.copy(alpha = 0.2f))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Text(
+                                        text = "Pre-Launch",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = CyanAccent,
+                                            fontSize = 8.sp
+                                        )
+                                    )
+                                }
+                            }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = String.format("%,.3f", userState.gridBalance),
-                                style = MaterialTheme.typography.headlineLarge.copy(
+                                text = "${String.format("%,.3f", userState.gridBalance)} GRID",
+                                style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Color.White
                                 )
                             )
                             Text(
-                                text = "GRID Token (Free Core)",
+                                text = "≈ $${String.format("%.2f", gridPreLaunchUsdValue)} USD (@ $0.05)",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = TextGold,
-                                    fontSize = 9.5.sp
+                                    fontSize = 9.sp
                                 )
                             )
                         }

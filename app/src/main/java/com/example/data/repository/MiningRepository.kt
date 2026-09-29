@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.example.data.notification.NotificationHelper
+import com.example.data.security.SecretKeyUtils
+import com.example.data.security.SecurityPreferences
 import java.util.UUID
 import kotlin.random.Random
 
@@ -19,9 +21,14 @@ class MiningRepository(context: Context) {
 
     private val appContext = context.applicationContext
     private val prefs: SharedPreferences = context.getSharedPreferences("hashgrid_prefs_v1", Context.MODE_PRIVATE)
+    val securityPreferences = SecurityPreferences(context)
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val firebaseManager = FirebaseManager(context)
     val nowPaymentsManager = NowPaymentsManager()
+
+    companion object {
+        const val GRID_PRELAUNCH_PRICE_USD = 0.05 // Configurable static Pre-Launch rate: 1 GRID = 0.05 USDT
+    }
 
     private val _userState = MutableStateFlow(loadInitialState())
     val userState: StateFlow<UserMiningState> = _userState.asStateFlow()
@@ -30,7 +37,7 @@ class MiningRepository(context: Context) {
         listOf(
             CryptoTickerPrice("BTC/USDT", 98250.40, +3.42, 99100.0, 96800.0),
             CryptoTickerPrice("ETH/USDT", 3420.85, +2.15, 3480.0, 3350.0),
-            CryptoTickerPrice("GRID/USDT", 0.145, +8.90, 0.160, 0.130)
+            CryptoTickerPrice("GRID/USDT", GRID_PRELAUNCH_PRICE_USD, 0.00, GRID_PRELAUNCH_PRICE_USD, GRID_PRELAUNCH_PRICE_USD)
         )
     )
     val cryptoPrices: StateFlow<List<CryptoTickerPrice>> = _cryptoPrices.asStateFlow()
@@ -44,6 +51,32 @@ class MiningRepository(context: Context) {
 
     private fun loadInitialState(): UserMiningState {
         val now = System.currentTimeMillis()
+
+        // 1. Get or Generate Web3 Secret Key
+        var key = securityPreferences.getSecretKey()
+        if (key.isNullOrBlank() || !SecretKeyUtils.isValidSecretKey(key)) {
+            key = SecretKeyUtils.generateSecretKey()
+            securityPreferences.setSecretKey(key)
+        }
+
+        val isPinConfigured = securityPreferences.isPinSet()
+        val isBiometricEnabled = securityPreferences.isBiometricEnabled()
+        val isKeyBackedUp = securityPreferences.isSecretKeyBackedUp()
+
+        // 2. Load Local Balances or defaults
+        val defaultGrid = 412.850
+        val defaultUsdt = 48.50
+        val savedGrid = prefs.getFloat("grid_balance", -1f)
+        val savedUsdt = prefs.getFloat("miner_balance", -1f)
+        val savedLastTick = prefs.getLong("last_yield_tick", 0L)
+
+        var initialGrid = if (savedGrid >= 0) savedGrid.toDouble() else defaultGrid
+        var initialUsdt = if (savedUsdt >= 0) savedUsdt.toDouble() else defaultUsdt
+
+        val sessionStart = prefs.getLong("free_session_start", now - (6L * 60 * 60 * 1000))
+        val sessionEnd = prefs.getLong("free_session_end", sessionStart + (24L * 60 * 60 * 1000))
+        var isFreeActive = prefs.getBoolean("free_session_active", true) && (now < sessionEnd)
+
         val defaultRigs = listOf(
             UserRig(
                 id = "rig-usr-101",
@@ -56,7 +89,7 @@ class MiningRepository(context: Context) {
                 status = RigStatus.ACTIVE,
                 totalReceivedUsdt = 0.60,
                 thisMonthEarnedUsdt = 0.60,
-                lastYieldCalculatedTimestamp = now
+                lastYieldCalculatedTimestamp = if (savedLastTick > 0) savedLastTick else now
             ),
             UserRig(
                 id = "rig-usr-102",
@@ -69,9 +102,39 @@ class MiningRepository(context: Context) {
                 status = RigStatus.ACTIVE,
                 totalReceivedUsdt = 3.12,
                 thisMonthEarnedUsdt = 3.12,
-                lastYieldCalculatedTimestamp = now
+                lastYieldCalculatedTimestamp = if (savedLastTick > 0) savedLastTick else now
             )
         )
+
+        // 3. Calculate Uninterrupted Offline Mining Earnings while app was closed or screen was off
+        if (savedLastTick > 0 && now > savedLastTick) {
+            val totalElapsedSec = ((now - savedLastTick) / 1000.0).coerceAtLeast(0.0)
+
+            // Free GRID Mining
+            if (isFreeActive) {
+                val effectiveEnd = if (now >= sessionEnd) sessionEnd else now
+                val freeMiningSec = ((effectiveEnd - savedLastTick) / 1000.0).coerceAtLeast(0.0)
+                val baseRateGh = 2.5 // Base + boost hashrate
+                val offlineGridEarned = freeMiningSec * baseRateGh * 0.00035
+                initialGrid += offlineGridEarned
+                if (now >= sessionEnd) {
+                    isFreeActive = false
+                }
+                Log.d("MiningRepository", "Accrued offline GRID: +$offlineGridEarned for $freeMiningSec seconds")
+            }
+
+            // Hardware Nodes USDT Mining
+            defaultRigs.forEach { rig ->
+                if (rig.status == RigStatus.ACTIVE) {
+                    val effectiveRigEnd = if (now >= rig.expiryTimestamp) rig.expiryTimestamp else now
+                    val rigSec = ((effectiveRigEnd - savedLastTick) / 1000.0).coerceAtLeast(0.0)
+                    val dailyYield = (rig.priceUsdt * 0.15) / 30.0
+                    val offlineUsdtEarned = (dailyYield / 86400.0) * rigSec
+                    initialUsdt += offlineUsdtEarned
+                    Log.d("MiningRepository", "Accrued offline USDT for ${rig.name}: +$offlineUsdtEarned")
+                }
+            }
+        }
 
         val defaultTx = listOf(
             TransactionItem(
@@ -118,16 +181,14 @@ class MiningRepository(context: Context) {
             )
         )
 
-        val sessionStart = now - (6L * 60 * 60 * 1000)
-        val sessionEnd = sessionStart + (24L * 60 * 60 * 1000)
-
         return UserMiningState(
-            uid = "HG-USER-8921",
-            email = "miner8921@hashgrid.pro",
-            nodeId = "NODE-US-EAST-#8921",
+            uid = key,
+            secretKey = key,
+            email = "miner_${key.takeLast(4).lowercase()}@hashgrid.pro",
+            nodeId = "NODE-WEB3-#${key.takeLast(4)}",
             isColdStorageSynced = true,
-            minerBalanceUsdt = 48.50,
-            gridBalance = 412.850,
+            minerBalanceUsdt = initialUsdt,
+            gridBalance = initialGrid,
             baseFreeHashrateGh = 1.0,
             referralCount = 3,
             activeReferredMiners = 2,
@@ -135,14 +196,20 @@ class MiningRepository(context: Context) {
             temporaryBoostExpiry = now + (14L * 60 * 60 * 1000),
             freeMiningSessionStart = sessionStart,
             freeMiningSessionEnd = sessionEnd,
-            isFreeMiningActive = true,
-            referralCode = "HG-8921",
+            isFreeMiningActive = isFreeActive,
+            referralCode = "HG-${key.takeLast(4)}",
             dailySpentUsdt = 0.0,
             dailySpentResetDate = now,
             lastDailySpinTimestamp = now - (20L * 60 * 60 * 1000),
             userRigs = defaultRigs,
             transactions = defaultTx,
-            microTasks = defaultTasks
+            microTasks = defaultTasks,
+            isKeyBackedUp = isKeyBackedUp,
+            isPinConfigured = isPinConfigured,
+            isBiometricEnabled = isBiometricEnabled,
+            isAppLocked = isPinConfigured, // Lock immediately on cold start if PIN is configured
+            lastYieldTickTimestamp = now,
+            createdAt = prefs.getLong("account_created_at", now)
         )
     }
 
@@ -150,10 +217,49 @@ class MiningRepository(context: Context) {
         scope.launch {
             // Initial sync to Firestore
             syncToCloud()
+            fetchCoinGeckoRates()
+            var secondCounter = 0
             while (isActive) {
                 delay(1000)
                 tickSecond()
+                secondCounter++
+                if (secondCounter % 60 == 0) {
+                    fetchCoinGeckoRates()
+                }
             }
+        }
+    }
+
+    private suspend fun fetchCoinGeckoRates() = withContext(Dispatchers.IO) {
+        try {
+            val request = okhttp3.Request.Builder()
+                .url("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true")
+                .header("Accept", "application/json")
+                .build()
+            val response = nowPaymentsManager.client.newCall(request).execute()
+            if (response.isSuccessful) {
+                val body = response.body?.string()
+                if (!body.isNullOrBlank()) {
+                    val json = org.json.JSONObject(body)
+                    val btcObj = json.optJSONObject("bitcoin")
+                    val ethObj = json.optJSONObject("ethereum")
+
+                    val btcPrice = btcObj?.optDouble("usd", 98250.0) ?: 98250.0
+                    val btcChange = btcObj?.optDouble("usd_24h_change", 2.1) ?: 2.1
+
+                    val ethPrice = ethObj?.optDouble("usd", 3420.0) ?: 3420.0
+                    val ethChange = ethObj?.optDouble("usd_24h_change", 1.5) ?: 1.5
+
+                    _cryptoPrices.value = listOf(
+                        CryptoTickerPrice("BTC/USDT", btcPrice, btcChange, btcPrice * 1.02, btcPrice * 0.98),
+                        CryptoTickerPrice("ETH/USDT", ethPrice, ethChange, ethPrice * 1.02, ethPrice * 0.98),
+                        CryptoTickerPrice("GRID/USDT", GRID_PRELAUNCH_PRICE_USD, 0.0, GRID_PRELAUNCH_PRICE_USD, GRID_PRELAUNCH_PRICE_USD)
+                    )
+                    Log.d("MiningRepository", "CoinGecko prices updated: BTC=$btcPrice, ETH=$ethPrice, GRID=$GRID_PRELAUNCH_PRICE_USD")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("MiningRepository", "CoinGecko price fetch note: ${e.message}")
         }
     }
 
@@ -226,14 +332,132 @@ class MiningRepository(context: Context) {
     }
 
     private fun syncToCloud() {
+        val state = _userState.value
+        // Save local offline copy to SharedPreferences
+        prefs.edit()
+            .putFloat("grid_balance", state.gridBalance.toFloat())
+            .putFloat("miner_balance", state.minerBalanceUsdt.toFloat())
+            .putLong("last_yield_tick", state.lastYieldTickTimestamp)
+            .putLong("free_session_start", state.freeMiningSessionStart)
+            .putLong("free_session_end", state.freeMiningSessionEnd)
+            .putBoolean("free_session_active", state.isFreeMiningActive)
+            .apply()
+
         scope.launch {
             try {
-                firebaseManager.syncUserStateToFirestore(_userState.value)
+                if (state.secretKey.isNotBlank()) {
+                    firebaseManager.saveUserUnderSecretKey(state.secretKey, state)
+                }
+                firebaseManager.syncUserStateToFirestore(state)
             } catch (e: Exception) {
                 Log.e("MiningRepository", "Cloud sync exception: ${e.message}")
             }
         }
     }
+
+    suspend fun restoreAccountWithSecretKey(secretKey: String): Result<UserMiningState> = withContext(Dispatchers.IO) {
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
+        if (!SecretKeyUtils.isValidSecretKey(cleanKey)) {
+            return@withContext Result.failure(Exception("Invalid format. Must be HG-XXXX-XXXX-XXXX-XXXX"))
+        }
+
+        val res = firebaseManager.restoreUserBySecretKey(cleanKey)
+        if (res.isSuccess) {
+            val restored = res.getOrThrow() ?: return@withContext Result.failure(Exception("No account found for secret key: $cleanKey"))
+
+            // Calculate uninterrupted offline yield up to current timestamp
+            val now = System.currentTimeMillis()
+            val lastTick = if (restored.lastYieldTickTimestamp > 0) restored.lastYieldTickTimestamp else now
+            val elapsedSec = ((now - lastTick) / 1000.0).coerceAtLeast(0.0)
+
+            var newGrid = restored.gridBalance
+            var isFreeActive = restored.isFreeMiningActive
+            if (isFreeActive) {
+                val activeFreeSec = if (now >= restored.freeMiningSessionEnd) {
+                    ((restored.freeMiningSessionEnd - lastTick) / 1000.0).coerceAtLeast(0.0)
+                } else {
+                    elapsedSec
+                }
+                newGrid += (activeFreeSec * restored.aggregateFreeHashrateGh * 0.00035)
+                if (now >= restored.freeMiningSessionEnd) {
+                    isFreeActive = false
+                }
+            }
+
+            var additionalUsdt = 0.0
+            val updatedRigs = restored.userRigs.map { rig ->
+                if (rig.status == RigStatus.ACTIVE) {
+                    val activeSec = if (now >= rig.expiryTimestamp) {
+                        ((rig.expiryTimestamp - rig.lastYieldCalculatedTimestamp) / 1000.0).coerceAtLeast(0.0)
+                    } else {
+                        ((now - rig.lastYieldCalculatedTimestamp) / 1000.0).coerceAtLeast(0.0)
+                    }
+                    val dailyYield = (rig.priceUsdt * 0.15) / 30.0
+                    val rigYield = (dailyYield / 86400.0) * activeSec
+                    additionalUsdt += rigYield
+                    rig.copy(
+                        status = if (now >= rig.expiryTimestamp) RigStatus.COMPLETED else RigStatus.ACTIVE,
+                        totalReceivedUsdt = rig.totalReceivedUsdt + rigYield,
+                        thisMonthEarnedUsdt = rig.thisMonthEarnedUsdt + rigYield,
+                        lastYieldCalculatedTimestamp = now
+                    )
+                } else rig
+            }
+
+            val finalState = restored.copy(
+                secretKey = cleanKey,
+                gridBalance = newGrid,
+                minerBalanceUsdt = restored.minerBalanceUsdt + additionalUsdt,
+                isFreeMiningActive = isFreeActive,
+                userRigs = updatedRigs,
+                lastYieldTickTimestamp = now,
+                isKeyBackedUp = true,
+                isPinConfigured = securityPreferences.isPinSet(),
+                isBiometricEnabled = securityPreferences.isBiometricEnabled(),
+                isAppLocked = false
+            )
+
+            securityPreferences.setSecretKey(cleanKey)
+            securityPreferences.setSecretKeyBackedUp(true)
+
+            _userState.value = finalState
+            syncToCloud()
+
+            Result.success(finalState)
+        } else {
+            Result.failure(res.exceptionOrNull() ?: Exception("Restore failed"))
+        }
+    }
+
+    fun setAppLocked(locked: Boolean) {
+        _userState.value = _userState.value.copy(isAppLocked = locked)
+    }
+
+    fun markSecretKeyBackedUp() {
+        securityPreferences.setSecretKeyBackedUp(true)
+        _userState.value = _userState.value.copy(isKeyBackedUp = true)
+    }
+
+    fun setPin(pin: String): Boolean {
+        val success = securityPreferences.setPin(pin)
+        if (success) {
+            _userState.value = _userState.value.copy(isPinConfigured = true, isAppLocked = false)
+        }
+        return success
+    }
+
+    fun verifyPin(pin: String): Boolean {
+        return securityPreferences.verifyPin(pin)
+    }
+
+    fun setBiometricEnabled(enabled: Boolean) {
+        securityPreferences.setBiometricEnabled(enabled)
+        _userState.value = _userState.value.copy(isBiometricEnabled = enabled)
+    }
+
+    fun isPinSet(): Boolean = securityPreferences.isPinSet()
+    fun isBiometricEnabled(): Boolean = securityPreferences.isBiometricEnabled()
+    fun getSecretKey(): String = securityPreferences.getSecretKey() ?: _userState.value.secretKey
 
     // ==========================================
     // NOWPAYMENTS GATEWAY & IPN INTEGRATION

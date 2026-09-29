@@ -25,7 +25,7 @@ import com.example.ui.theme.*
 @Composable
 fun HashrateProfitCalculator(
     initialHashrateGh: Double = 30.0,
-    gridMarketPriceUsd: Double = 0.145,
+    gridMarketPriceUsd: Double = 0.05,
     onDeployNodeClicked: ((hashrateGh: Double) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -125,14 +125,14 @@ fun HashrateProfitCalculator(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
                         .background(DarkNavySurface)
-                        .border(1.dp, EmeraldAccent, RoundedCornerShape(12.dp))
+                        .border(1.dp, CyanAccent, RoundedCornerShape(12.dp))
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = "GRID = $${String.format("%.3f", gridMarketPriceUsd)}",
+                        text = "PRE-LAUNCH: $0.05 / GRID",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
-                            color = TextEmerald,
+                            color = CyanAccent,
                             fontSize = 9.5.sp
                         )
                     )

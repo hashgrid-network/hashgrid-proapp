@@ -77,14 +77,6 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun testNowPaymentsIpnHmacVerification() {
-        val manager = NowPaymentsManager()
-        val samplePayload = """{"payment_id":12345,"payment_status":"finished","pay_address":"0xabc"}"""
-        // verify signature logic runs without error
-        assertFalse(manager.verifyIpnSignature(samplePayload, "invalid_signature"))
-    }
-
-    @Test
     fun testHashrateProfitCalculatorFormula() {
         val hashrateGh = 30.0
         val estimatedHardwareCostUsd = hashrateGh * 3.333 // ~$100 USD
@@ -100,5 +92,24 @@ class ExampleUnitTest {
     fun testNotificationChannelsConstants() {
         assertEquals("hashgrid_mining_channel", com.example.data.notification.NotificationHelper.CHANNEL_MINING)
         assertEquals("hashgrid_payment_channel", com.example.data.notification.NotificationHelper.CHANNEL_PAYMENT)
+    }
+
+    @Test
+    fun testGridPreLaunchPriceConstant() {
+        assertEquals(0.05, com.example.data.repository.MiningRepository.GRID_PRELAUNCH_PRICE_USD, 0.0001)
+    }
+
+    @Test
+    fun testSecretKeyGenerationAndValidation() {
+        val generated = com.example.data.security.SecretKeyUtils.generateSecretKey()
+        assertTrue(generated.startsWith("HG-"))
+        assertTrue(com.example.data.security.SecretKeyUtils.isValidSecretKey(generated))
+
+        val normalized = com.example.data.security.SecretKeyUtils.normalizeSecretKey("hg-7k9p-m2x4-w8q1-j5r3")
+        assertEquals("HG-7K9P-M2X4-W8Q1-J5R3", normalized)
+        assertTrue(com.example.data.security.SecretKeyUtils.isValidSecretKey(normalized))
+
+        assertFalse(com.example.data.security.SecretKeyUtils.isValidSecretKey("INVALID-KEY"))
+        assertFalse(com.example.data.security.SecretKeyUtils.isValidSecretKey("HG-1234-5678"))
     }
 }

@@ -30,3 +30,8 @@ val TextSecondary = Color(0xFF94A3B8)
 val TextMuted = Color(0xFF64748B)
 val TextGold = Color(0xFFFBBF24)
 val TextEmerald = Color(0xFF34D399)
+
+// Cyber & Security Aliases
+val CyberGold = GoldPrimary
+val SurfaceDark = DarkNavySurface
+val NeonGreen = EmeraldAccent

@@ -31,16 +31,60 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import com.example.data.notification.NotificationHelper
 
-class MainActivity : ComponentActivity() {
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import androidx.activity.viewModels
+import androidx.fragment.app.FragmentActivity
+import com.example.ui.components.security.*
+
+class MainActivity : FragmentActivity() {
+
+    private val viewModel: MiningViewModel by viewModels()
+
+    private val screenOffReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+                // Physical screen turned off / locked: Trigger smart app lock
+                viewModel.lockApp()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         NotificationHelper.createNotificationChannels(this)
+
+        // Register smart screen off receiver
+        val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+        registerReceiver(screenOffReceiver, filter)
+
         setContent {
             HashGridTheme {
-                MainApp()
+                MainApp(viewModel = viewModel)
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // If device keyguard is locked, ensure terminal is locked
+        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+        if (keyguardManager?.isKeyguardLocked == true) {
+            viewModel.lockApp()
+        }
+        // Note: If user minimized app (e.g. checked WhatsApp/browser) without locking the phone screen,
+        // ACTION_SCREEN_OFF did not fire and isKeyguardLocked is false, so app remains unlocked upon return!
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            unregisterReceiver(screenOffReceiver)
+        } catch (_: Exception) {}
     }
 }
 
@@ -75,6 +119,12 @@ fun MainApp(
     val showVideoPromo by viewModel.showVideoPromoDialog.collectAsStateWithLifecycle()
     val showHowItWorks by viewModel.showHowItWorksDialog.collectAsStateWithLifecycle()
     val showTaskPolicy by viewModel.showTaskPolicyDialog.collectAsStateWithLifecycle()
+
+    // Security & Web3 States
+    val showSecretKeyBackup by viewModel.showSecretKeyBackupModal.collectAsStateWithLifecycle()
+    val showSecretKeyRestore by viewModel.showSecretKeyRestoreModal.collectAsStateWithLifecycle()
+    val showPinSetup by viewModel.showPinSetupModal.collectAsStateWithLifecycle()
+    val isRestoringAccount by viewModel.isRestoringAccount.collectAsStateWithLifecycle()
 
     // NOWPayments State
     val activePayment by viewModel.activePaymentSession.collectAsStateWithLifecycle()
@@ -173,7 +223,12 @@ fun MainApp(
                         onOpenVideoPromo = { viewModel.showVideoPromoDialog.value = true },
                         onOpenHowItWorks = { viewModel.showHowItWorksDialog.value = true },
                         onOpenTaskPolicy = { viewModel.showTaskPolicyDialog.value = true },
-                        onApprovePendingTasks = { viewModel.approvePendingTasks() }
+                        onApprovePendingTasks = { viewModel.approvePendingTasks() },
+                        onOpenSecretKeyBackup = { viewModel.showSecretKeyBackupModal.value = true },
+                        onOpenSecretKeyRestore = { viewModel.showSecretKeyRestoreModal.value = true },
+                        onOpenPinSetup = { viewModel.showPinSetupModal.value = true },
+                        onToggleBiometric = { viewModel.toggleBiometric(it) },
+                        onLockAppNow = { viewModel.lockApp() }
                     )
                 }
             }
@@ -262,6 +317,45 @@ fun MainApp(
         PaymentSuccessDialog(
             payment = lastConfirmedPayment,
             onDismiss = { viewModel.showPaymentSuccessDialog.value = false }
+        )
+    }
+
+    // Web3 Secret Key Backup Modal
+    if (showSecretKeyBackup) {
+        SecretKeyBackupModal(
+            secretKey = userState.secretKey,
+            onDismiss = { viewModel.showSecretKeyBackupModal.value = false },
+            onConfirmBackedUp = { viewModel.markSecretKeyBackedUp() }
+        )
+    }
+
+    // Web3 Secret Key Restore Modal
+    if (showSecretKeyRestore) {
+        SecretKeyRestoreModal(
+            isLoading = isRestoringAccount,
+            onDismiss = { viewModel.showSecretKeyRestoreModal.value = false },
+            onRestore = { key -> viewModel.restoreAccountWithSecretKey(key) }
+        )
+    }
+
+    // 4-Digit PIN & Biometric Setup Modal
+    if (showPinSetup) {
+        PinSetupModal(
+            onDismiss = { viewModel.showPinSetupModal.value = false },
+            onPinSet = { pin, bio ->
+                viewModel.setPin(pin)
+                viewModel.toggleBiometric(bio)
+            }
+        )
+    }
+
+    // Smart Device Lock Screen Overlay
+    if (userState.isAppLocked) {
+        LockScreenOverlay(
+            isBiometricEnabled = userState.isBiometricEnabled,
+            onUnlockWithPin = { pin -> viewModel.unlockWithPin(pin) },
+            onUnlockWithBiometric = { viewModel.unlockWithBiometric() },
+            onForgotPinClick = { viewModel.showSecretKeyRestoreModal.value = true }
         )
     }
 }

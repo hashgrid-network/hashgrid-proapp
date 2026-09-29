@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -40,6 +41,11 @@ fun ProfileScreen(
     onOpenHowItWorks: () -> Unit,
     onOpenTaskPolicy: () -> Unit,
     onApprovePendingTasks: () -> Unit,
+    onOpenSecretKeyBackup: () -> Unit = {},
+    onOpenSecretKeyRestore: () -> Unit = {},
+    onOpenPinSetup: () -> Unit = {},
+    onToggleBiometric: (Boolean) -> Unit = {},
+    onLockAppNow: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -134,6 +140,169 @@ fun ProfileScreen(
             }
         }
 
+        // Web3 Security & Smart App Lock Card
+        item {
+            GlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("security_web3_card"),
+                borderColor = GoldPrimary.copy(alpha = 0.4f)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Key, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(20.dp))
+                            Text(
+                                "WEB3 SECURITY & APP LOCK",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, color = TextPrimary)
+                            )
+                        }
+
+                        // Backup Status Badge
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (userState.isKeyBackedUp) EmeraldDark.copy(alpha = 0.4f) else GoldDark.copy(alpha = 0.4f))
+                                .border(1.dp, if (userState.isKeyBackedUp) EmeraldAccent else GoldPrimary, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = if (userState.isKeyBackedUp) "BACKED UP ✓" else "KEY BACKUP REQUIRED ⚠️",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (userState.isKeyBackedUp) TextEmerald else TextGold,
+                                    fontSize = 8.5.sp
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Secret Key Display
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(DarkNavySurface)
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Account Secret Key", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.sp))
+                            val maskedKey = if (userState.secretKey.length > 8) {
+                                "${userState.secretKey.take(7)}••••-••••-${userState.secretKey.takeLast(4)}"
+                            } else {
+                                userState.secretKey
+                            }
+                            Text(
+                                maskedKey,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = GoldLight,
+                                    fontSize = 11.5.sp,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                )
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = onOpenSecretKeyBackup,
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.6f))
+                        ) {
+                            Text("View / Copy", fontSize = 11.sp, color = GoldPrimary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // PIN & Biometric Controls Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onOpenPinSetup,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderGlass)
+                        ) {
+                            Icon(Icons.Default.Pin, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                if (userState.isPinConfigured) "Change PIN" else "Set 4-Digit PIN",
+                                fontSize = 11.sp,
+                                color = TextPrimary
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = onOpenSecretKeyRestore,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderGlass)
+                        ) {
+                            Icon(Icons.Default.Restore, contentDescription = null, tint = EmeraldAccent, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Restore Key", fontSize = 11.sp, color = TextEmerald)
+                        }
+                    }
+
+                    // Biometric Toggle and Instant Lock Row
+                    if (userState.isPinConfigured) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(DarkNavySurface.copy(alpha = 0.5f))
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Fingerprint, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Fingerprint Unlock", fontSize = 11.sp, color = TextPrimary)
+                            }
+
+                            Switch(
+                                checked = userState.isBiometricEnabled,
+                                onCheckedChange = onToggleBiometric,
+                                modifier = Modifier.scale(0.8f),
+                                colors = SwitchDefaults.colors(checkedThumbColor = ObsidianBg, checkedTrackColor = GoldPrimary)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        TextButton(
+                            onClick = onLockAppNow,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Lock Terminal Now (Test Security)", fontSize = 11.sp, color = GoldLight)
+                        }
+                    }
+                }
+            }
+        }
+
         // Wallet & Balances Card
         item {
             GlassCard(
@@ -145,9 +314,39 @@ fun ProfileScreen(
                         .fillMaxWidth()
                         .padding(16.dp)
                 ) {
+                    val gridUsdVal = userState.gridBalance * 0.05
+                    val totalPort = userState.minerBalanceUsdt + gridUsdVal
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "WALLET BALANCES",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextGold)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(CyanAccent.copy(alpha = 0.15f))
+                                .border(0.5.dp, CyanAccent, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Pre-Launch: $0.05 / GRID",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyanAccent,
+                                    fontSize = 8.5.sp
+                                )
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "WALLET BALANCES",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextGold)
+                        text = "Est. Portfolio: $${String.format("%,.2f", totalPort)} USD",
+                        style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 10.sp)
                     )
                     Spacer(modifier = Modifier.height(10.dp))
 
@@ -161,13 +360,15 @@ fun ProfileScreen(
                                 "$${String.format("%.2f", userState.minerBalanceUsdt)} USDT",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold, color = GoldLight)
                             )
+                            Text("Withdrawable", style = MaterialTheme.typography.labelSmall.copy(color = TextEmerald, fontSize = 8.5.sp))
                         }
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("GRID Coin Balance", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
+                            Text("GRID Balance", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
                             Text(
                                 "${String.format("%,.3f", userState.gridBalance)} GRID",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold, color = Color.White)
                             )
+                            Text("≈ $${String.format("%.2f", gridUsdVal)} USD", style = MaterialTheme.typography.labelSmall.copy(color = TextGold, fontSize = 8.5.sp))
                         }
                     }
 

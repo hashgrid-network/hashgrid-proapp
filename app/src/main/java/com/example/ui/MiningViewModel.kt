@@ -53,6 +53,12 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     val showHowItWorksDialog = MutableStateFlow(false)
     val showTaskPolicyDialog = MutableStateFlow(false)
 
+    // Security, Secret Key & Smart Lock States
+    val showSecretKeyBackupModal = MutableStateFlow(false)
+    val showSecretKeyRestoreModal = MutableStateFlow(false)
+    val showPinSetupModal = MutableStateFlow(false)
+    val isRestoringAccount = MutableStateFlow(false)
+
     // NOWPayments Gateway State
     val activePaymentSession = MutableStateFlow<NowPaymentResponse?>(null)
     val isCreatingPayment = MutableStateFlow(false)
@@ -236,6 +242,77 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     fun approvePendingTasks() {
         repository.approvePendingTasksSimulation()
         emitToast("Simulation: Pending promotional bounties approved and credited!")
+    }
+
+    // ==========================================
+    // SECURITY & RESTORE METHODS
+    // ==========================================
+
+    fun unlockWithPin(pin: String): Boolean {
+        val valid = repository.verifyPin(pin)
+        if (valid) {
+            repository.setAppLocked(false)
+        }
+        return valid
+    }
+
+    fun unlockWithBiometric() {
+        repository.setAppLocked(false)
+    }
+
+    fun lockApp() {
+        if (repository.isPinSet()) {
+            repository.setAppLocked(true)
+        }
+    }
+
+    fun setAppLocked(locked: Boolean) {
+        if (locked && !repository.isPinSet()) {
+            // Can't lock if no PIN configured
+            return
+        }
+        repository.setAppLocked(locked)
+    }
+
+    fun setPin(pin: String): Boolean {
+        val success = repository.setPin(pin)
+        if (success) {
+            showPinSetupModal.value = false
+            emitToast("4-Digit Security PIN configured successfully!")
+        }
+        return success
+    }
+
+    fun toggleBiometric(enabled: Boolean) {
+        repository.setBiometricEnabled(enabled)
+        emitToast(if (enabled) "Biometric Fingerprint Unlock Enabled" else "Biometric Fingerprint Disabled")
+    }
+
+    fun markSecretKeyBackedUp() {
+        repository.markSecretKeyBackedUp()
+        showSecretKeyBackupModal.value = false
+        if (!repository.isPinSet()) {
+            showPinSetupModal.value = true
+        }
+        emitToast("Secret Key backup confirmed! Keep your key safe.")
+    }
+
+    fun restoreAccountWithSecretKey(secretKey: String) {
+        viewModelScope.launch {
+            isRestoringAccount.value = true
+            val result = repository.restoreAccountWithSecretKey(secretKey)
+            isRestoringAccount.value = false
+            if (result.isSuccess) {
+                showSecretKeyRestoreModal.value = false
+                repository.setAppLocked(false)
+                emitToast("Account Restored Successfully! All balances and active rigs synced from Firestore.")
+                if (!repository.isPinSet()) {
+                    showPinSetupModal.value = true
+                }
+            } else {
+                emitToast(result.exceptionOrNull()?.message ?: "Account restoration failed.")
+            }
+        }
     }
 
     private fun emitToast(msg: String) {

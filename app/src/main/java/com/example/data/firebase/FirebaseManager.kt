@@ -14,17 +14,23 @@ import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
+import com.google.firebase.firestore.FirebaseFirestoreSettings
+import com.google.firebase.firestore.PersistentCacheSettings
+import com.google.firebase.firestore.DocumentSnapshot
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
 class FirebaseManager(private val context: Context) {
 
     companion object {
         const val TAG = "HashGridFirebase"
-        const val API_KEY = "AIzaSyD8XqcWgN9EbaUSBVYhf5oBk1qgo3lHnyA"
-        const val AUTH_DOMAIN = "hashgrid-b850b.firebaseapp.com"
-        const val DATABASE_URL = "https://hashgrid-b850b-default-rtdb.asia-southeast1.firebasedatabase.app"
-        const val PROJECT_ID = "hashgrid-b850b"
-        const val STORAGE_BUCKET = "hashgrid-b850b.firebasestorage.app"
-        const val SENDER_ID = "621346408367"
-        const val APP_ID = "1:621346408367:web:7621be60d110b9105a915a"
+        const val API_KEY = "AIzaSyCMDAfHJ6awiJYRDoJ1PR-UMC7yF8_kauc"
+        const val AUTH_DOMAIN = "hashgrid-c7fe4.firebaseapp.com"
+        const val PROJECT_ID = "hashgrid-c7fe4"
+        const val STORAGE_BUCKET = "hashgrid-c7fe4.firebasestorage.app"
+        const val SENDER_ID = "885427334784"
+        const val APP_ID = "1:885427334784:android:3b18fbfb14a82cb36e0065"
     }
 
     private var firestore: FirebaseFirestore? = null
@@ -36,18 +42,32 @@ class FirebaseManager(private val context: Context) {
     private fun initializeFirebase() {
         try {
             if (FirebaseApp.getApps(context).isEmpty()) {
-                val options = FirebaseOptions.Builder()
-                    .setApiKey(API_KEY)
-                    .setApplicationId(APP_ID)
-                    .setDatabaseUrl(DATABASE_URL)
-                    .setProjectId(PROJECT_ID)
-                    .setStorageBucket(STORAGE_BUCKET)
-                    .setGcmSenderId(SENDER_ID)
-                    .build()
-                FirebaseApp.initializeApp(context, options)
-                Log.d(TAG, "Firebase initialized with hashgrid-b850b options.")
+                try {
+                    FirebaseApp.initializeApp(context)
+                } catch (e: Exception) {
+                    val options = FirebaseOptions.Builder()
+                        .setApiKey(API_KEY)
+                        .setApplicationId(APP_ID)
+                        .setProjectId(PROJECT_ID)
+                        .setStorageBucket(STORAGE_BUCKET)
+                        .setGcmSenderId(SENDER_ID)
+                        .build()
+                    FirebaseApp.initializeApp(context, options)
+                }
+                Log.d(TAG, "Firebase initialized for hashgrid-c7fe4.")
             }
-            firestore = FirebaseFirestore.getInstance()
+            val db = FirebaseFirestore.getInstance()
+            try {
+                // Enable Offline Persistence with local cache
+                val settings = FirebaseFirestoreSettings.Builder()
+                    .setLocalCacheSettings(PersistentCacheSettings.newBuilder().build())
+                    .build()
+                db.firestoreSettings = settings
+                Log.d(TAG, "Firestore Offline Persistence enabled.")
+            } catch (e: Exception) {
+                Log.d(TAG, "Firestore settings already configured: ${e.message}")
+            }
+            firestore = db
             Log.d(TAG, "Firestore instance retrieved successfully.")
 
             // Safely attempt FCM token retrieval with fallback to avoid hard failure exceptions
@@ -267,6 +287,218 @@ class FirebaseManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Firestore sync error: ${e.message}", e)
             false
+        }
+    }
+
+    /**
+     * Saves user under users/{secretKey} with activeMiningRigs, depositHistory, withdrawalHistory, and balances.
+     */
+    suspend fun saveUserUnderSecretKey(secretKey: String, state: UserMiningState): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val db = firestore ?: FirebaseFirestore.getInstance()
+
+            val activeRigsList = state.userRigs.map { rig ->
+                mapOf(
+                    "rigId" to rig.id,
+                    "catalogId" to rig.catalogId,
+                    "name" to rig.name,
+                    "hashrate" to rig.hashrateGh,
+                    "priceUsdt" to rig.priceUsdt,
+                    "startTimestamp" to rig.purchaseTimestamp,
+                    "expiryTimestamp" to rig.expiryTimestamp,
+                    "durationDays" to rig.durationDays,
+                    "dailyEarning" to (rig.priceUsdt * 0.15 / 30.0),
+                    "status" to rig.status.name,
+                    "totalReceivedUsdt" to rig.totalReceivedUsdt,
+                    "thisMonthEarnedUsdt" to rig.thisMonthEarnedUsdt,
+                    "lastYieldCalculatedTimestamp" to rig.lastYieldCalculatedTimestamp
+                )
+            }
+
+            val depositsList = state.transactions.filter { it.type == TransactionType.DEPOSIT }.map { tx ->
+                mapOf(
+                    "id" to tx.id,
+                    "amount" to tx.amount,
+                    "currency" to tx.currency,
+                    "timestamp" to tx.timestamp,
+                    "status" to tx.status.name,
+                    "description" to tx.description,
+                    "txHash" to (tx.txHash ?: ""),
+                    "network" to (tx.network ?: "")
+                )
+            }
+
+            val withdrawalsList = state.transactions.filter { it.type == TransactionType.WITHDRAWAL }.map { tx ->
+                mapOf(
+                    "id" to tx.id,
+                    "amount" to tx.amount,
+                    "currency" to tx.currency,
+                    "timestamp" to tx.timestamp,
+                    "status" to tx.status.name,
+                    "description" to tx.description,
+                    "address" to (tx.address ?: "")
+                )
+            }
+
+            val docData = hashMapOf(
+                "secretKey" to secretKey,
+                "uid" to secretKey,
+                "gridBalance" to state.gridBalance,
+                "usdtBalance" to state.minerBalanceUsdt,
+                "activeMiningRigs" to activeRigsList,
+                "depositHistory" to depositsList,
+                "withdrawalHistory" to withdrawalsList,
+                "isFreeMiningActive" to state.isFreeMiningActive,
+                "freeMiningSessionStart" to state.freeMiningSessionStart,
+                "freeMiningSessionEnd" to state.freeMiningSessionEnd,
+                "aggregateFreeHashrateGh" to state.aggregateFreeHashrateGh,
+                "lastYieldTickTimestamp" to state.lastYieldTickTimestamp,
+                "createdAt" to state.createdAt,
+                "lastSyncTimestamp" to System.currentTimeMillis()
+            )
+
+            suspendCancellableCoroutine<Boolean> { continuation ->
+                db.collection("users").document(secretKey)
+                    .set(docData, SetOptions.merge())
+                    .addOnSuccessListener {
+                        continuation.resume(true)
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e(TAG, "Failed to save user under secret key: ${e.message}", e)
+                        continuation.resume(false)
+                    }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving user under secret key: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Restores user profile and transaction/rig history from users/{secretKey}.
+     */
+    suspend fun restoreUserBySecretKey(secretKey: String): Result<UserMiningState?> = withContext(Dispatchers.IO) {
+        try {
+            val db = firestore ?: FirebaseFirestore.getInstance()
+            val cleanKey = secretKey.trim().uppercase()
+
+            val snapshot = suspendCancellableCoroutine<DocumentSnapshot> { continuation ->
+                db.collection("users").document(cleanKey).get()
+                    .addOnSuccessListener { doc ->
+                        continuation.resume(doc)
+                    }
+                    .addOnFailureListener { e ->
+                        continuation.resumeWithException(e)
+                    }
+            }
+
+            if (!snapshot.exists()) {
+                return@withContext Result.failure(Exception("No account found matching Secret Key: $cleanKey"))
+            }
+
+            val gridBalance = snapshot.getDouble("gridBalance") ?: 0.0
+            val usdtBalance = snapshot.getDouble("usdtBalance") ?: 0.0
+            val isFreeActive = snapshot.getBoolean("isFreeMiningActive") ?: false
+            val sessionStart = snapshot.getLong("freeMiningSessionStart") ?: 0L
+            val sessionEnd = snapshot.getLong("freeMiningSessionEnd") ?: 0L
+            val lastYieldTick = snapshot.getLong("lastYieldTickTimestamp") ?: snapshot.getLong("lastSyncTimestamp") ?: System.currentTimeMillis()
+            val createdAt = snapshot.getLong("createdAt") ?: System.currentTimeMillis()
+
+            // Parse Rigs
+            val rigsRaw = snapshot.get("activeMiningRigs") as? List<Map<String, Any>> ?: emptyList()
+            val restoredRigs = rigsRaw.mapNotNull { map ->
+                try {
+                    val id = map["rigId"] as? String ?: return@mapNotNull null
+                    val name = map["name"] as? String ?: "Mining Node"
+                    val catalogId = map["catalogId"] as? String ?: "starter_node"
+                    val priceUsdt = (map["priceUsdt"] as? Number)?.toDouble() ?: 10.0
+                    val hashrate = (map["hashrate"] as? Number)?.toDouble() ?: 2.0
+                    val startTimestamp = (map["startTimestamp"] as? Number)?.toLong() ?: System.currentTimeMillis()
+                    val durationDays = (map["durationDays"] as? Number)?.toInt() ?: 200
+                    val statusStr = map["status"] as? String ?: RigStatus.ACTIVE.name
+                    val status = if (statusStr == RigStatus.COMPLETED.name) RigStatus.COMPLETED else RigStatus.ACTIVE
+                    val totalReceivedUsdt = (map["totalReceivedUsdt"] as? Number)?.toDouble() ?: 0.0
+                    val thisMonthEarnedUsdt = (map["thisMonthEarnedUsdt"] as? Number)?.toDouble() ?: 0.0
+                    val lastCalculated = (map["lastYieldCalculatedTimestamp"] as? Number)?.toLong() ?: startTimestamp
+
+                    UserRig(
+                        id = id,
+                        catalogId = catalogId,
+                        name = name,
+                        priceUsdt = priceUsdt,
+                        hashrateGh = hashrate,
+                        purchaseTimestamp = startTimestamp,
+                        durationDays = durationDays,
+                        status = status,
+                        totalReceivedUsdt = totalReceivedUsdt,
+                        thisMonthEarnedUsdt = thisMonthEarnedUsdt,
+                        lastYieldCalculatedTimestamp = lastCalculated
+                    )
+                } catch (e: Exception) {
+                    null
+                }
+            }
+
+            // Parse transactions
+            val depositsRaw = snapshot.get("depositHistory") as? List<Map<String, Any>> ?: emptyList()
+            val withdrawalsRaw = snapshot.get("withdrawalHistory") as? List<Map<String, Any>> ?: emptyList()
+
+            val restoredTxList = mutableListOf<TransactionItem>()
+            depositsRaw.forEach { map ->
+                try {
+                    restoredTxList.add(
+                        TransactionItem(
+                            id = map["id"] as? String ?: "tx-${System.currentTimeMillis()}",
+                            type = TransactionType.DEPOSIT,
+                            amount = (map["amount"] as? Number)?.toDouble() ?: 0.0,
+                            currency = map["currency"] as? String ?: "USDT",
+                            timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+                            status = TransactionStatus.COMPLETED,
+                            description = map["description"] as? String ?: "Deposit Confirmed",
+                            txHash = map["txHash"] as? String,
+                            network = map["network"] as? String
+                        )
+                    )
+                } catch (_: Exception) {}
+            }
+            withdrawalsRaw.forEach { map ->
+                try {
+                    restoredTxList.add(
+                        TransactionItem(
+                            id = map["id"] as? String ?: "tx-${System.currentTimeMillis()}",
+                            type = TransactionType.WITHDRAWAL,
+                            amount = (map["amount"] as? Number)?.toDouble() ?: 0.0,
+                            currency = map["currency"] as? String ?: "USDT",
+                            timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+                            status = TransactionStatus.COMPLETED,
+                            description = map["description"] as? String ?: "Withdrawal Completed",
+                            address = map["address"] as? String
+                        )
+                    )
+                } catch (_: Exception) {}
+            }
+
+            val restored = UserMiningState(
+                uid = cleanKey,
+                secretKey = cleanKey,
+                email = "miner_${cleanKey.takeLast(4).lowercase()}@hashgrid.pro",
+                nodeId = "NODE-WEB3-#${cleanKey.takeLast(4)}",
+                gridBalance = gridBalance,
+                minerBalanceUsdt = usdtBalance,
+                isFreeMiningActive = isFreeActive,
+                freeMiningSessionStart = sessionStart,
+                freeMiningSessionEnd = sessionEnd,
+                userRigs = restoredRigs,
+                transactions = restoredTxList,
+                lastYieldTickTimestamp = lastYieldTick,
+                createdAt = createdAt,
+                isKeyBackedUp = true
+            )
+
+            Result.success(restored)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restore user by secret key: ${e.message}", e)
+            Result.failure(e)
         }
     }
 }

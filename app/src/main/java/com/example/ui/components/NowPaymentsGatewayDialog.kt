@@ -244,7 +244,39 @@ fun NowPaymentsGatewayDialog(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Subtle Gateway Clarification Notice
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF0F172A))
+                            .border(0.5.dp, GoldPrimary.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = null,
+                                tint = GoldLight,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Automated Gateway: A unique one-time deposit address is generated for this transaction. Funds will automatically credit to your mining balance upon network confirmation.",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = TextSecondary,
+                                    fontSize = 9.sp,
+                                    lineHeight = 13.sp
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // Deposit Address Box
                     Column(

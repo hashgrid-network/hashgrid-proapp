@@ -254,10 +254,31 @@ fun CloudMinerScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text(
-                                text = "TOTAL MINED GRID TOKENS",
-                                style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp, letterSpacing = 0.5.sp)
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "TOTAL MINED GRID TOKENS",
+                                    style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp, letterSpacing = 0.5.sp)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(CyanAccent.copy(alpha = 0.15f))
+                                        .border(0.5.dp, CyanAccent, RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Text(
+                                        text = "PRE-LAUNCH",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = CyanAccent,
+                                            fontSize = 7.5.sp
+                                        )
+                                    )
+                                }
+                            }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = "${String.format("%,.4f", userState.gridBalance)} GRID",
@@ -267,8 +288,8 @@ fun CloudMinerScreen(
                                 )
                             )
                             Text(
-                                text = "Free mining earns GRID coins continuously",
-                                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.5.sp)
+                                text = "≈ $${String.format("%.2f", userState.gridBalance * 0.05)} USD (@ $0.05 Pre-Launch Rate)",
+                                style = MaterialTheme.typography.labelSmall.copy(color = TextEmerald, fontSize = 9.5.sp)
                             )
                         }
                     }

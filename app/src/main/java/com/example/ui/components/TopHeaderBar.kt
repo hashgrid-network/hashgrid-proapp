@@ -107,9 +107,27 @@ fun TopHeaderBar(
                                 color = TextPrimary
                             )
                         )
+                        if (ticker.symbol.startsWith("GRID")) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(CyanAccent.copy(alpha = 0.15f))
+                                    .border(0.5.dp, CyanAccent, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                            ) {
+                                Text(
+                                    text = "PRE-LAUNCH",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = CyanAccent,
+                                        fontSize = 8.sp
+                                    )
+                                )
+                            }
+                        }
                         Text(
                             text = if (ticker.symbol.startsWith("GRID")) {
-                                "$${String.format("%.4f", ticker.price)}"
+                                "$${String.format("%.2f", ticker.price)}"
                             } else {
                                 "$${String.format("%,.2f", ticker.price)}"
                             },
@@ -119,14 +137,25 @@ fun TopHeaderBar(
                             )
                         )
                         val isPositive = ticker.change24h >= 0
-                        Text(
-                            text = "${if (isPositive) "+" else ""}${String.format("%.2f", ticker.change24h)}%",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = if (isPositive) EmeraldAccent else CrimsonError,
-                                fontSize = 10.sp
+                        if (!ticker.symbol.startsWith("GRID")) {
+                            Text(
+                                text = "${if (isPositive) "+" else ""}${String.format("%.2f", ticker.change24h)}%",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isPositive) EmeraldAccent else CrimsonError,
+                                    fontSize = 10.sp
+                                )
                             )
-                        )
+                        } else {
+                            Text(
+                                text = "Fixed $0.05",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextEmerald,
+                                    fontSize = 9.sp
+                                )
+                            )
+                        }
                     }
                 }
             }
