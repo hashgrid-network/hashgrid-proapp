@@ -51,6 +51,94 @@ class MiningRepository(context: Context) {
     init {
         startBackgroundEngine()
         attachSystemSettingsListener()
+        val current = _userState.value
+        if (current.isAuthenticated && current.secretKey.isNotBlank()) {
+            scope.launch {
+                hydrateFromFirestore(current.secretKey)
+            }
+        }
+    }
+
+    private suspend fun hydrateFromFirestore(secretKey: String) {
+        try {
+            val res = firebaseManager.restoreUserBySecretKey(secretKey)
+            val now = System.currentTimeMillis()
+            if (res.isSuccess && res.getOrNull() != null) {
+                val restored = res.getOrThrow()!!
+                val caughtUpState = applyOfflineCatchUpYield(restored, now)
+                _userState.value = caughtUpState.copy(
+                    isKeyBackedUp = securityPreferences.isSecretKeyBackedUp(),
+                    isPinConfigured = securityPreferences.isPinSet(),
+                    isBiometricEnabled = securityPreferences.isBiometricEnabled(),
+                    isAuthenticated = true
+                )
+                firebaseManager.saveUserUnderSecretKey(secretKey, _userState.value)
+                Log.d("MiningRepository", "Successfully hydrated and caught up user state from Firestore.")
+            } else {
+                // Initialize in Firestore if not present
+                firebaseManager.saveUserUnderSecretKey(secretKey, _userState.value)
+            }
+        } catch (e: Exception) {
+            Log.w("MiningRepository", "Hydration from Firestore note: ${e.message}")
+        }
+    }
+
+    /**
+     * Continuous offline yield calculation based on system epoch timestamps.
+     * Guarantees zero lost mining seconds even when app is killed or device is offline.
+     */
+    fun applyOfflineCatchUpYield(state: UserMiningState, now: Long = System.currentTimeMillis()): UserMiningState {
+        var grid = state.gridBalance
+        var usdt = state.minerBalanceUsdt
+        var isMiningActive = state.isFreeMiningActive
+        val lastTimestamp = if (state.lastYieldTickTimestamp > 0) state.lastYieldTickTimestamp else now
+
+        // 1. Free GRID Core Mining Catch-up (0.5 GRID per GH/s per 24h)
+        if (isMiningActive && now > lastTimestamp) {
+            val calculationEnd = Math.min(now, state.freeMiningSessionEnd)
+            val elapsedMillis = (calculationEnd - lastTimestamp).coerceAtLeast(0L)
+            if (elapsedMillis > 0) {
+                val elapsedHours = elapsedMillis.toDouble() / (1000.0 * 60.0 * 60.0)
+                val minedGrid = (state.aggregateFreeHashrateGh * 0.5 * (elapsedHours / 24.0))
+                grid += minedGrid
+            }
+            if (now >= state.freeMiningSessionEnd) {
+                isMiningActive = false
+            }
+        }
+
+        // 2. Hardware Nodes USDT Yield Catch-up (~15% monthly yield over lifespan)
+        val dailyUsdtYieldRate = 0.15 / 30.0
+        val updatedRigs = state.userRigs.map { rig ->
+            if (rig.status == RigStatus.ACTIVE) {
+                val lastRigCalc = if (rig.lastYieldCalculatedTimestamp > 0) rig.lastYieldCalculatedTimestamp else rig.purchaseTimestamp
+                val rigEnd = Math.min(now, rig.expiryTimestamp)
+                val rigElapsedMillis = (rigEnd - lastRigCalc).coerceAtLeast(0L)
+                if (rigElapsedMillis > 0) {
+                    val daysElapsed = rigElapsedMillis.toDouble() / (1000.0 * 60.0 * 60.0 * 24.0)
+                    val nodeYield = (rig.priceUsdt * dailyUsdtYieldRate) * daysElapsed
+                    usdt += nodeYield
+                    rig.copy(
+                        status = if (now >= rig.expiryTimestamp) RigStatus.COMPLETED else RigStatus.ACTIVE,
+                        totalReceivedUsdt = rig.totalReceivedUsdt + nodeYield,
+                        thisMonthEarnedUsdt = rig.thisMonthEarnedUsdt + nodeYield,
+                        lastYieldCalculatedTimestamp = rigEnd
+                    )
+                } else {
+                    rig
+                }
+            } else {
+                rig
+            }
+        }
+
+        return state.copy(
+            gridBalance = grid,
+            minerBalanceUsdt = usdt,
+            isFreeMiningActive = isMiningActive,
+            userRigs = updatedRigs,
+            lastYieldTickTimestamp = now
+        )
     }
 
     private fun attachSystemSettingsListener() {
@@ -414,6 +502,17 @@ class MiningRepository(context: Context) {
     }
 
     fun logout() {
+        val current = _userState.value
+        if (current.isAuthenticated && current.secretKey.isNotBlank()) {
+            scope.launch {
+                try {
+                    firebaseManager.saveUserUnderSecretKey(current.secretKey, current)
+                    firebaseManager.syncUserStateToFirestore(current)
+                } catch (e: Throwable) {
+                    Log.e("MiningRepository", "Flush state before logout: ${e.message}")
+                }
+            }
+        }
         securityPreferences.clearSession()
         _userState.value = UserMiningState(
             uid = "",
@@ -439,51 +538,13 @@ class MiningRepository(context: Context) {
         val finalState = if (res.isSuccess && res.getOrNull() != null) {
             val restored = res.getOrThrow()!!
             val userRole = if (isMasterAdmin) "superadmin" else restored.role
-            val lastTick = if (restored.lastYieldTickTimestamp > 0) restored.lastYieldTickTimestamp else now
-            val elapsedSec = ((now - lastTick) / 1000.0).coerceAtLeast(0.0)
 
-            var newGrid = restored.gridBalance
-            var isFreeActive = restored.isFreeMiningActive
-            if (isFreeActive) {
-                val activeFreeSec = if (now >= restored.freeMiningSessionEnd) {
-                    ((restored.freeMiningSessionEnd - lastTick) / 1000.0).coerceAtLeast(0.0)
-                } else {
-                    elapsedSec
-                }
-                newGrid += (activeFreeSec * restored.aggregateFreeHashrateGh * 0.00035)
-                if (now >= restored.freeMiningSessionEnd) {
-                    isFreeActive = false
-                }
-            }
+            // Apply offline continuous yield calculation since last saved timestamp
+            val caughtUp = applyOfflineCatchUpYield(restored, now)
 
-            var additionalUsdt = 0.0
-            val updatedRigs = restored.userRigs.map { rig ->
-                if (rig.status == RigStatus.ACTIVE) {
-                    val activeSec = if (now >= rig.expiryTimestamp) {
-                        ((rig.expiryTimestamp - rig.lastYieldCalculatedTimestamp) / 1000.0).coerceAtLeast(0.0)
-                    } else {
-                        ((now - rig.lastYieldCalculatedTimestamp) / 1000.0).coerceAtLeast(0.0)
-                    }
-                    val dailyYield = (rig.priceUsdt * 0.15) / 30.0
-                    val rigYield = (dailyYield / 86400.0) * activeSec
-                    additionalUsdt += rigYield
-                    rig.copy(
-                        status = if (now >= rig.expiryTimestamp) RigStatus.COMPLETED else RigStatus.ACTIVE,
-                        totalReceivedUsdt = rig.totalReceivedUsdt + rigYield,
-                        thisMonthEarnedUsdt = rig.thisMonthEarnedUsdt + rigYield,
-                        lastYieldCalculatedTimestamp = now
-                    )
-                } else rig
-            }
-
-            restored.copy(
+            caughtUp.copy(
                 secretKey = cleanKey,
                 uid = cleanKey,
-                gridBalance = newGrid,
-                minerBalanceUsdt = restored.minerBalanceUsdt + additionalUsdt,
-                isFreeMiningActive = isFreeActive,
-                userRigs = updatedRigs,
-                lastYieldTickTimestamp = now,
                 isKeyBackedUp = true,
                 isPinConfigured = securityPreferences.isPinSet(),
                 isBiometricEnabled = securityPreferences.isBiometricEnabled(),
@@ -493,7 +554,7 @@ class MiningRepository(context: Context) {
                 isAuthenticated = true
             )
         } else if (isMasterAdmin) {
-            UserMiningState(
+            val adminState = UserMiningState(
                 uid = cleanKey,
                 secretKey = cleanKey,
                 email = "admin@hashgrid.pro",
@@ -504,8 +565,33 @@ class MiningRepository(context: Context) {
                 referralCount = 150,
                 activeReferredMiners = 95,
                 referralCode = "HG-ADM01",
-                userRigs = emptyList(),
-                transactions = emptyList(),
+                userRigs = listOf(
+                    UserRig(
+                        id = "rig-titan-adm-01",
+                        catalogId = "titan_enterprise_node",
+                        name = "Titan Enterprise Node #001",
+                        priceUsdt = 500.0,
+                        hashrateGh = 180.0,
+                        purchaseTimestamp = now,
+                        durationDays = 200,
+                        status = RigStatus.ACTIVE,
+                        totalReceivedUsdt = 0.0,
+                        thisMonthEarnedUsdt = 0.0,
+                        lastYieldCalculatedTimestamp = now
+                    )
+                ),
+                transactions = listOf(
+                    TransactionItem(
+                        id = "tx-admin-genesis",
+                        type = TransactionType.DEPOSIT,
+                        amount = 5000.0,
+                        currency = "USDT",
+                        timestamp = now,
+                        status = TransactionStatus.COMPLETED,
+                        description = "Master SuperAdmin Genesis Protocol Liquidity",
+                        network = "BEP20 (BSC)"
+                    )
+                ),
                 isKeyBackedUp = true,
                 isPinConfigured = securityPreferences.isPinSet(),
                 isBiometricEnabled = securityPreferences.isBiometricEnabled(),
@@ -516,8 +602,37 @@ class MiningRepository(context: Context) {
                 role = "superadmin",
                 isAuthenticated = true
             )
+            firebaseManager.saveUserUnderSecretKey(cleanKey, adminState)
+            adminState
         } else {
-            UserMiningState(
+            val defaultRigs = listOf(
+                UserRig(
+                    id = "rig-starter-node-101",
+                    catalogId = "starter_node",
+                    name = "Starter Node #101",
+                    priceUsdt = 10.0,
+                    hashrateGh = 2.0,
+                    purchaseTimestamp = now,
+                    durationDays = 200,
+                    status = RigStatus.ACTIVE,
+                    totalReceivedUsdt = 0.0,
+                    thisMonthEarnedUsdt = 0.0,
+                    lastYieldCalculatedTimestamp = now
+                )
+            )
+            val defaultTx = listOf(
+                TransactionItem(
+                    id = "tx-init-node-deposit",
+                    type = TransactionType.DEPOSIT,
+                    amount = 48.50,
+                    currency = "USDT",
+                    timestamp = now,
+                    status = TransactionStatus.COMPLETED,
+                    description = "Genesis Liquidity Allocation",
+                    network = "BEP20 (BSC)"
+                )
+            )
+            val newUserState = UserMiningState(
                 uid = cleanKey,
                 secretKey = cleanKey,
                 email = "miner_${cleanKey.takeLast(4).lowercase()}@hashgrid.pro",
@@ -528,8 +643,8 @@ class MiningRepository(context: Context) {
                 referralCount = 3,
                 activeReferredMiners = 2,
                 referralCode = "HG-${cleanKey.takeLast(4)}",
-                userRigs = emptyList(),
-                transactions = emptyList(),
+                userRigs = defaultRigs,
+                transactions = defaultTx,
                 isKeyBackedUp = true,
                 isPinConfigured = securityPreferences.isPinSet(),
                 isBiometricEnabled = securityPreferences.isBiometricEnabled(),
@@ -540,6 +655,8 @@ class MiningRepository(context: Context) {
                 role = "user",
                 isAuthenticated = true
             )
+            firebaseManager.saveUserUnderSecretKey(cleanKey, newUserState)
+            newUserState
         }
 
         securityPreferences.setSecretKey(cleanKey)
@@ -547,6 +664,7 @@ class MiningRepository(context: Context) {
         securityPreferences.setSecretKeyBackedUp(true)
 
         _userState.value = finalState
+        firebaseManager.saveUserUnderSecretKey(cleanKey, finalState)
         syncToCloud()
 
         Result.success(finalState)
@@ -883,14 +1001,23 @@ class MiningRepository(context: Context) {
             description = "Deployed ${catalogItem.name} (${catalogItem.hashrateGh} GH/s) for ${catalogItem.durationDays} Days"
         )
 
-        _userState.value = current.copy(
+        val updatedState = current.copy(
             minerBalanceUsdt = newBalance,
             dailySpentUsdt = current.dailySpentUsdt + catalogItem.priceUsdt,
             userRigs = listOf(newRig) + current.userRigs,
-            transactions = listOf(tx) + current.transactions
+            transactions = listOf(tx) + current.transactions,
+            lastYieldTickTimestamp = now
         )
 
-        syncToCloud()
+        _userState.value = updatedState
+
+        scope.launch {
+            if (current.secretKey.isNotBlank()) {
+                firebaseManager.saveUserUnderSecretKey(current.secretKey, updatedState)
+            }
+            firebaseManager.recordPlanActivation(current.uid, newRig, newBalance)
+            syncToCloud()
+        }
         return Result.success(newRig)
     }
 

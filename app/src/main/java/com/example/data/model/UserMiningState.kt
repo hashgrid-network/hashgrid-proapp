@@ -30,6 +30,7 @@ data class UserMiningState(
     
     // Limits and Referrals
     val referralCode: String = "HG-8921",
+    val referredBy: String? = null,
     val dailySpentUsdt: Double = 0.0,
     val dailySpentResetDate: Long = System.currentTimeMillis(),
     val lastDailySpinTimestamp: Long = 0L,

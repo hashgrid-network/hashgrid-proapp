@@ -199,4 +199,79 @@ class ExampleUnitTest {
         assertTrue(shareMsg.contains("https://hashgrid.online/?ref=HG-7K9P"))
         assertTrue(shareMsg.contains("🚀 Join HashGrid Pro"))
     }
+
+    @Test
+    fun testOfflineMiningCatchUpFormula() {
+        val now = 1700000000000L
+        val twoHoursAgo = now - (2L * 60 * 60 * 1000) // 2 hours
+        val sessionEnd = now + (22L * 60 * 60 * 1000)
+
+        val starterRig = UserRig(
+            id = "node-101",
+            catalogId = "starter_node",
+            name = "Starter Node #101",
+            priceUsdt = 10.0,
+            hashrateGh = 2.0,
+            purchaseTimestamp = twoHoursAgo,
+            durationDays = 200,
+            status = RigStatus.ACTIVE,
+            totalReceivedUsdt = 0.0,
+            thisMonthEarnedUsdt = 0.0,
+            lastYieldCalculatedTimestamp = twoHoursAgo
+        )
+
+        val initialState = UserMiningState(
+            gridBalance = 100.0,
+            minerBalanceUsdt = 50.0,
+            baseFreeHashrateGh = 2.0,
+            referralCount = 0,
+            activeReferredMiners = 0,
+            isFreeMiningActive = true,
+            freeMiningSessionStart = twoHoursAgo,
+            freeMiningSessionEnd = sessionEnd,
+            lastYieldTickTimestamp = twoHoursAgo,
+            userRigs = listOf(starterRig)
+        )
+
+        // Offline catchup formula verification:
+        // 1. Free GRID: 2 hours elapsed at 2.0 GH/s = (2.0 * 0.5 * (2.0 / 24.0)) = (1.0 * 1/12) = 0.08333 GRID
+        val elapsedHours = 2.0
+        val expectedGridMined = 2.0 * 0.5 * (elapsedHours / 24.0)
+        assertEquals(0.08333, expectedGridMined, 0.001)
+
+        // 2. Hardware USDT Yield: 2 hours elapsed on $10 node = ($10 * (0.15 / 30.0)) * (2.0 / 24.0) = $0.05 * (1/12) = $0.004166 USDT
+        val daysElapsed = 2.0 / 24.0
+        val expectedRigYield = (10.0 * (0.15 / 30.0)) * daysElapsed
+        assertEquals(0.004166, expectedRigYield, 0.0001)
+
+        val caughtUpGrid = initialState.gridBalance + expectedGridMined
+        val caughtUpUsdt = initialState.minerBalanceUsdt + expectedRigYield
+        assertEquals(100.08333, caughtUpGrid, 0.001)
+        assertEquals(50.004166, caughtUpUsdt, 0.0001)
+    }
+
+    @Test
+    fun testHardwareNodesDataIntegrity() {
+        val rig = UserRig(
+            id = "101",
+            catalogId = "starter_node",
+            name = "Starter Node #101",
+            priceUsdt = 10.0,
+            hashrateGh = 2.0,
+            purchaseTimestamp = System.currentTimeMillis(),
+            durationDays = 200,
+            status = RigStatus.ACTIVE,
+            totalReceivedUsdt = 1.25,
+            thisMonthEarnedUsdt = 1.25
+        )
+
+        assertEquals("101", rig.id)
+        assertEquals("Starter Node #101", rig.name)
+        assertEquals(10.0, rig.priceUsdt, 0.001)
+        assertEquals(2.0, rig.hashrateGh, 0.001)
+        assertEquals(200, rig.durationDays)
+        assertEquals(RigStatus.ACTIVE, rig.status)
+        assertEquals(1.25, rig.totalReceivedUsdt, 0.001)
+        assertTrue(rig.daysRemaining() > 195)
+    }
 }

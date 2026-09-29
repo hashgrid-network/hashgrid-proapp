@@ -304,27 +304,35 @@ class FirebaseManager(private val context: Context) {
     }
 
     /**
-     * Saves user under users/{secretKey} with activeMiningRigs, depositHistory, withdrawalHistory, and balances.
+     * Saves user under users/{secretKey} with strict hardwareNodes array, timestamps, and balances.
      */
     suspend fun saveUserUnderSecretKey(secretKey: String, state: UserMiningState): Boolean = withContext(Dispatchers.IO) {
         try {
             val db = firestore ?: FirebaseFirestore.getInstance()
 
-            val activeRigsList = state.userRigs.map { rig ->
+            val hardwareNodesList = state.userRigs.map { rig ->
                 mapOf(
-                    "rigId" to rig.id,
-                    "catalogId" to rig.catalogId,
-                    "name" to rig.name,
-                    "hashrate" to rig.hashrateGh,
-                    "priceUsdt" to rig.priceUsdt,
-                    "startTimestamp" to rig.purchaseTimestamp,
-                    "expiryTimestamp" to rig.expiryTimestamp,
-                    "durationDays" to rig.durationDays,
-                    "dailyEarning" to (rig.priceUsdt * 0.15 / 30.0),
+                    "nodeId" to rig.id,
+                    "nodeName" to rig.name,
+                    "costUsdt" to rig.priceUsdt,
+                    "hashrateGh" to rig.hashrateGh,
+                    "purchaseTimestamp" to rig.purchaseTimestamp,
+                    "totalDays" to rig.durationDays,
+                    "daysRemaining" to rig.daysRemaining(),
+                    "receivedUsdt" to rig.totalReceivedUsdt,
                     "status" to rig.status.name,
-                    "totalReceivedUsdt" to rig.totalReceivedUsdt,
+                    "catalogId" to rig.catalogId,
                     "thisMonthEarnedUsdt" to rig.thisMonthEarnedUsdt,
-                    "lastYieldCalculatedTimestamp" to rig.lastYieldCalculatedTimestamp
+                    "lastYieldCalculatedTimestamp" to rig.lastYieldCalculatedTimestamp,
+                    "expiryTimestamp" to rig.expiryTimestamp,
+                    // Alias fields for backwards compatibility
+                    "rigId" to rig.id,
+                    "name" to rig.name,
+                    "priceUsdt" to rig.priceUsdt,
+                    "hashrate" to rig.hashrateGh,
+                    "durationDays" to rig.durationDays,
+                    "totalReceivedUsdt" to rig.totalReceivedUsdt,
+                    "startTimestamp" to rig.purchaseTimestamp
                 )
             }
 
@@ -355,19 +363,38 @@ class FirebaseManager(private val context: Context) {
 
             val docData = hashMapOf(
                 "secretKey" to secretKey,
-                "uid" to secretKey,
+                "isAdmin" to (state.isAdmin || SecretKeyUtils.isMasterAdminKey(secretKey)),
                 "gridBalance" to state.gridBalance,
                 "usdtBalance" to state.minerBalanceUsdt,
-                "activeMiningRigs" to activeRigsList,
+                "totalHashrate" to state.totalAggregateHashrateGh,
+                "isMiningActive" to state.isFreeMiningActive,
+                "miningStartTime" to state.freeMiningSessionStart,
+                "miningEndTime" to state.freeMiningSessionEnd,
+                "lastYieldTimestamp" to state.lastYieldTickTimestamp,
+                "referralCode" to state.referralCode,
+                "referredBy" to state.referredBy,
+                "hardwareNodes" to hardwareNodesList,
+                "activeMiningRigs" to hardwareNodesList,
                 "depositHistory" to depositsList,
                 "withdrawalHistory" to withdrawalsList,
+                "uid" to secretKey,
+                "email" to state.email,
+                "nodeId" to state.nodeId,
+                "baseFreeHashrateGh" to state.baseFreeHashrateGh,
+                "referralCount" to state.referralCount,
+                "activeReferredMiners" to state.activeReferredMiners,
+                "temporaryBoostHashrateGh" to state.temporaryBoostHashrateGh,
+                "temporaryBoostExpiry" to state.temporaryBoostExpiry,
+                "dailySpentUsdt" to state.dailySpentUsdt,
+                "lastDailySpinTimestamp" to state.lastDailySpinTimestamp,
                 "isFreeMiningActive" to state.isFreeMiningActive,
                 "freeMiningSessionStart" to state.freeMiningSessionStart,
                 "freeMiningSessionEnd" to state.freeMiningSessionEnd,
-                "aggregateFreeHashrateGh" to state.aggregateFreeHashrateGh,
-                "isAdmin" to (state.isAdmin || SecretKeyUtils.isMasterAdminKey(secretKey)),
-                "role" to (if (state.isAdmin || SecretKeyUtils.isMasterAdminKey(secretKey)) "superadmin" else state.role),
                 "lastYieldTickTimestamp" to state.lastYieldTickTimestamp,
+                "isKeyBackedUp" to state.isKeyBackedUp,
+                "isPinConfigured" to state.isPinConfigured,
+                "isBiometricEnabled" to state.isBiometricEnabled,
+                "role" to (if (state.isAdmin || SecretKeyUtils.isMasterAdminKey(secretKey)) "superadmin" else state.role),
                 "createdAt" to state.createdAt,
                 "lastSyncTimestamp" to System.currentTimeMillis()
             )
@@ -376,6 +403,7 @@ class FirebaseManager(private val context: Context) {
                 db.collection("users").document(secretKey)
                     .set(docData, SetOptions.merge())
                     .addOnSuccessListener {
+                        Log.d(TAG, "Saved full user state to Firestore users/$secretKey successfully.")
                         continuation.resume(true)
                     }
                     .addOnFailureListener { e ->
@@ -385,6 +413,25 @@ class FirebaseManager(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error saving user under secret key: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Checks if a user document exists in users/{secretKey}.
+     */
+    suspend fun checkUserDocumentExists(secretKey: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val db = firestore ?: FirebaseFirestore.getInstance()
+            val cleanKey = secretKey.trim().uppercase()
+            val snapshot = suspendCancellableCoroutine<DocumentSnapshot> { continuation ->
+                db.collection("users").document(cleanKey).get()
+                    .addOnSuccessListener { doc -> continuation.resume(doc) }
+                    .addOnFailureListener { e -> continuation.resumeWithException(e) }
+            }
+            snapshot.exists()
+        } catch (e: Exception) {
+            Log.w(TAG, "checkUserDocumentExists error: ${e.message}")
             false
         }
     }
@@ -412,29 +459,40 @@ class FirebaseManager(private val context: Context) {
             }
 
             val gridBalance = snapshot.getDouble("gridBalance") ?: 0.0
-            val usdtBalance = snapshot.getDouble("usdtBalance") ?: 0.0
-            val isFreeActive = snapshot.getBoolean("isFreeMiningActive") ?: false
-            val sessionStart = snapshot.getLong("freeMiningSessionStart") ?: 0L
-            val sessionEnd = snapshot.getLong("freeMiningSessionEnd") ?: 0L
-            val lastYieldTick = snapshot.getLong("lastYieldTickTimestamp") ?: snapshot.getLong("lastSyncTimestamp") ?: System.currentTimeMillis()
+            val usdtBalance = snapshot.getDouble("usdtBalance") ?: snapshot.getDouble("minerBalanceUsdt") ?: 0.0
+            val isMiningActive = snapshot.getBoolean("isMiningActive") ?: snapshot.getBoolean("isFreeMiningActive") ?: false
+            val sessionStart = snapshot.getLong("miningStartTime") ?: snapshot.getLong("freeMiningSessionStart") ?: 0L
+            val sessionEnd = snapshot.getLong("miningEndTime") ?: snapshot.getLong("freeMiningSessionEnd") ?: 0L
+            val lastYieldTick = snapshot.getLong("lastYieldTimestamp") ?: snapshot.getLong("lastYieldTickTimestamp") ?: snapshot.getLong("lastSyncTimestamp") ?: System.currentTimeMillis()
+            val referralCode = snapshot.getString("referralCode") ?: "HG-${cleanKey.takeLast(4)}"
+            val referredBy = snapshot.getString("referredBy")
+            val baseFreeHashrate = snapshot.getDouble("baseFreeHashrateGh") ?: 1.0
+            val referralCount = (snapshot.getLong("referralCount") ?: 3L).toInt()
+            val activeReferredMiners = (snapshot.getLong("activeReferredMiners") ?: 2L).toInt()
+            val tempBoostGh = snapshot.getDouble("temporaryBoostHashrateGh") ?: 0.0
+            val tempBoostExpiry = snapshot.getLong("temporaryBoostExpiry") ?: 0L
+            val lastDailySpin = snapshot.getLong("lastDailySpinTimestamp") ?: 0L
             val createdAt = snapshot.getLong("createdAt") ?: System.currentTimeMillis()
             val isMasterAdmin = SecretKeyUtils.isMasterAdminKey(cleanKey) || (snapshot.getBoolean("isAdmin") ?: false)
             val userRole = if (isMasterAdmin) "superadmin" else (snapshot.getString("role") ?: "user")
 
-            // Parse Rigs
-            val rigsRaw = snapshot.get("activeMiningRigs") as? List<Map<String, Any>> ?: emptyList()
-            val restoredRigs = rigsRaw.mapNotNull { map ->
+            // Parse Hardware Nodes / Rigs
+            val nodesRaw = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>)
+                ?: (snapshot.get("activeMiningRigs") as? List<Map<String, Any>>)
+                ?: emptyList()
+
+            val restoredRigs = nodesRaw.mapNotNull { map ->
                 try {
-                    val id = map["rigId"] as? String ?: return@mapNotNull null
-                    val name = map["name"] as? String ?: "Mining Node"
-                    val catalogId = map["catalogId"] as? String ?: "starter_node"
-                    val priceUsdt = (map["priceUsdt"] as? Number)?.toDouble() ?: 10.0
-                    val hashrate = (map["hashrate"] as? Number)?.toDouble() ?: 2.0
-                    val startTimestamp = (map["startTimestamp"] as? Number)?.toLong() ?: System.currentTimeMillis()
-                    val durationDays = (map["durationDays"] as? Number)?.toInt() ?: 200
-                    val statusStr = map["status"] as? String ?: RigStatus.ACTIVE.name
+                    val id = (map["nodeId"] as? String) ?: (map["rigId"] as? String) ?: (map["id"] as? String) ?: return@mapNotNull null
+                    val name = (map["nodeName"] as? String) ?: (map["name"] as? String) ?: "Mining Node"
+                    val catalogId = (map["catalogId"] as? String) ?: "starter_node"
+                    val priceUsdt = (map["costUsdt"] as? Number)?.toDouble() ?: (map["priceUsdt"] as? Number)?.toDouble() ?: 10.0
+                    val hashrate = (map["hashrateGh"] as? Number)?.toDouble() ?: (map["hashrate"] as? Number)?.toDouble() ?: 2.0
+                    val startTimestamp = (map["purchaseTimestamp"] as? Number)?.toLong() ?: (map["startTimestamp"] as? Number)?.toLong() ?: System.currentTimeMillis()
+                    val durationDays = (map["totalDays"] as? Number)?.toInt() ?: (map["durationDays"] as? Number)?.toInt() ?: 200
+                    val statusStr = (map["status"] as? String)?.uppercase() ?: RigStatus.ACTIVE.name
                     val status = if (statusStr == RigStatus.COMPLETED.name) RigStatus.COMPLETED else RigStatus.ACTIVE
-                    val totalReceivedUsdt = (map["totalReceivedUsdt"] as? Number)?.toDouble() ?: 0.0
+                    val totalReceivedUsdt = (map["receivedUsdt"] as? Number)?.toDouble() ?: (map["totalReceivedUsdt"] as? Number)?.toDouble() ?: 0.0
                     val thisMonthEarnedUsdt = (map["thisMonthEarnedUsdt"] as? Number)?.toDouble() ?: 0.0
                     val lastCalculated = (map["lastYieldCalculatedTimestamp"] as? Number)?.toLong() ?: startTimestamp
 
@@ -502,7 +560,15 @@ class FirebaseManager(private val context: Context) {
                 nodeId = "NODE-WEB3-#${cleanKey.takeLast(4)}",
                 gridBalance = gridBalance,
                 minerBalanceUsdt = usdtBalance,
-                isFreeMiningActive = isFreeActive,
+                baseFreeHashrateGh = baseFreeHashrate,
+                referralCount = referralCount,
+                activeReferredMiners = activeReferredMiners,
+                temporaryBoostHashrateGh = tempBoostGh,
+                temporaryBoostExpiry = tempBoostExpiry,
+                referralCode = referralCode,
+                referredBy = referredBy,
+                lastDailySpinTimestamp = lastDailySpin,
+                isFreeMiningActive = isMiningActive,
                 freeMiningSessionStart = sessionStart,
                 freeMiningSessionEnd = sessionEnd,
                 userRigs = restoredRigs,
