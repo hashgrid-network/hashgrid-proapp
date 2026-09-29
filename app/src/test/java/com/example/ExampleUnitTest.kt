@@ -274,4 +274,19 @@ class ExampleUnitTest {
         assertEquals(1.25, rig.totalReceivedUsdt, 0.001)
         assertTrue(rig.daysRemaining() > 195)
     }
+
+    @Test
+    fun testNewUserAccountZeroBalances() {
+        val defaultState = UserMiningState()
+        assertEquals(0.0, defaultState.minerBalanceUsdt, 0.0001)
+        assertEquals(0.0, defaultState.gridBalance, 0.0001)
+        assertEquals(2.0, defaultState.baseFreeHashrateGh, 0.0001)
+        assertEquals(0, defaultState.referralCount)
+        assertEquals(0, defaultState.activeReferredMiners)
+        assertFalse(defaultState.isFreeMiningActive)
+        assertEquals(0L, defaultState.freeMiningSessionStart)
+        assertEquals(0L, defaultState.freeMiningSessionEnd)
+        assertTrue(defaultState.userRigs.isEmpty())
+        assertTrue(defaultState.transactions.isEmpty())
+    }
 }

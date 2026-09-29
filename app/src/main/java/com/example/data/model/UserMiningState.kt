@@ -9,19 +9,19 @@ data class CryptoTickerPrice(
 )
 
 data class UserMiningState(
-    val uid: String = "HG-USER-8921",
-    val email: String = "miner8921@hashgrid.pro",
-    val nodeId: String = "NODE-US-EAST-#8921",
+    val uid: String = "",
+    val email: String = "",
+    val nodeId: String = "",
     val isColdStorageSynced: Boolean = true,
     
-    // Balances
-    val minerBalanceUsdt: Double = 15.80, // Withdrawable USDT
-    val gridBalance: Double = 348.520,   // GRID coin balance
+    // Balances (Strict Zero Defaults)
+    val minerBalanceUsdt: Double = 0.0, // Withdrawable USDT
+    val gridBalance: Double = 0.0,      // GRID coin balance
     
     // Free Mining Core
-    val baseFreeHashrateGh: Double = 1.0, // Base hashrate
-    val referralCount: Int = 3,           // 3 registered referrals
-    val activeReferredMiners: Int = 2,     // 2 active mining referrals
+    val baseFreeHashrateGh: Double = 2.0, // Free Base Node power (2.0 GH/s)
+    val referralCount: Int = 0,           // 0 referrals initially
+    val activeReferredMiners: Int = 0,     // 0 active mining referrals
     val temporaryBoostHashrateGh: Double = 0.0, // From lucky wheel
     val temporaryBoostExpiry: Long = 0L,
     val freeMiningSessionStart: Long = 0L,
@@ -29,13 +29,13 @@ data class UserMiningState(
     val isFreeMiningActive: Boolean = false,
     
     // Limits and Referrals
-    val referralCode: String = "HG-8921",
+    val referralCode: String = "",
     val referredBy: String? = null,
     val dailySpentUsdt: Double = 0.0,
     val dailySpentResetDate: Long = System.currentTimeMillis(),
     val lastDailySpinTimestamp: Long = 0L,
     
-    // Lists
+    // Lists (Empty lists initially)
     val userRigs: List<UserRig> = emptyList(),
     val transactions: List<TransactionItem> = emptyList(),
     val spinHistory: List<SpinHistoryRecord> = emptyList(),

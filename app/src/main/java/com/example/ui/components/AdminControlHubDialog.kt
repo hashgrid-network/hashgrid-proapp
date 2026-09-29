@@ -435,7 +435,7 @@ fun AdminControlHubDialog(
 
                             // Peer node entries
                             val mockPeers = listOf(
-                                Triple("NODE-US-EAST-#8921", "miner_8921@hashgrid.pro", "48.50 USDT • 348.52 GRID"),
+                                Triple("NODE-US-EAST-#8921", "miner_8921@hashgrid.pro", "0.00 USDT • 0.00 GRID (New Node)"),
                                 Triple("NODE-EU-CENTRAL-#3302", "miner_3302@hashgrid.pro", "125.00 USDT • 812.00 GRID"),
                                 Triple("NODE-AP-SOUTH-#5199", "miner_5199@hashgrid.pro", "10.00 USDT • 150.25 GRID")
                             )

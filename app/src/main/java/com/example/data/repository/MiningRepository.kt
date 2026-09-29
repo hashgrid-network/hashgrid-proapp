@@ -186,9 +186,9 @@ class MiningRepository(context: Context) {
         val isMasterAdmin = SecretKeyUtils.isMasterAdminKey(key)
         val userRole = if (isMasterAdmin) "superadmin" else "user"
 
-        // 2. Load Local Balances or defaults
-        val defaultGrid = 412.850
-        val defaultUsdt = 48.50
+        // 2. Load Local Balances or strict zero defaults
+        val defaultGrid = 0.0
+        val defaultUsdt = 0.0
         val savedGrid = prefs.getFloat("grid_balance", -1f)
         val savedUsdt = prefs.getFloat("miner_balance", -1f)
         val savedLastTick = prefs.getLong("last_yield_tick", 0L)
@@ -196,115 +196,13 @@ class MiningRepository(context: Context) {
         var initialGrid = if (savedGrid >= 0) savedGrid.toDouble() else defaultGrid
         var initialUsdt = if (savedUsdt >= 0) savedUsdt.toDouble() else defaultUsdt
 
-        val sessionStart = prefs.getLong("free_session_start", now - (6L * 60 * 60 * 1000))
-        val sessionEnd = prefs.getLong("free_session_end", sessionStart + (24L * 60 * 60 * 1000))
-        var isFreeActive = prefs.getBoolean("free_session_active", true) && (now < sessionEnd)
+        val sessionStart = prefs.getLong("free_session_start", 0L)
+        val sessionEnd = prefs.getLong("free_session_end", 0L)
+        var isFreeActive = prefs.getBoolean("free_session_active", false) && (now < sessionEnd)
 
-        val defaultRigs = listOf(
-            UserRig(
-                id = "rig-usr-101",
-                catalogId = "starter_node",
-                name = "Starter Node #101",
-                priceUsdt = 10.0,
-                hashrateGh = 2.0,
-                purchaseTimestamp = now - (12L * 24 * 60 * 60 * 1000), // 12 days ago
-                durationDays = 200,
-                status = RigStatus.ACTIVE,
-                totalReceivedUsdt = 0.60,
-                thisMonthEarnedUsdt = 0.60,
-                lastYieldCalculatedTimestamp = if (savedLastTick > 0) savedLastTick else now
-            ),
-            UserRig(
-                id = "rig-usr-102",
-                catalogId = "pro_miner_node",
-                name = "Pro Miner Node #102",
-                priceUsdt = 25.0,
-                hashrateGh = 6.0,
-                purchaseTimestamp = now - (25L * 24 * 60 * 60 * 1000), // 25 days ago
-                durationDays = 200,
-                status = RigStatus.ACTIVE,
-                totalReceivedUsdt = 3.12,
-                thisMonthEarnedUsdt = 3.12,
-                lastYieldCalculatedTimestamp = if (savedLastTick > 0) savedLastTick else now
-            )
-        )
+        val loadedRigs = emptyList<UserRig>()
 
-        // 3. Calculate Uninterrupted Offline Mining Earnings while app was closed or screen was off
-        if (savedLastTick > 0 && now > savedLastTick) {
-            val totalElapsedSec = ((now - savedLastTick) / 1000.0).coerceAtLeast(0.0)
-
-            // Free GRID Mining
-            if (isFreeActive) {
-                val effectiveEnd = if (now >= sessionEnd) sessionEnd else now
-                val freeMiningSec = ((effectiveEnd - savedLastTick) / 1000.0).coerceAtLeast(0.0)
-                val baseRateGh = 2.5 // Base + boost hashrate
-                val offlineGridEarned = freeMiningSec * baseRateGh * 0.00035
-                initialGrid += offlineGridEarned
-                if (now >= sessionEnd) {
-                    isFreeActive = false
-                }
-                Log.d("MiningRepository", "Accrued offline GRID: +$offlineGridEarned for $freeMiningSec seconds")
-            }
-
-            // Hardware Nodes USDT Mining
-            defaultRigs.forEach { rig ->
-                if (rig.status == RigStatus.ACTIVE) {
-                    val effectiveRigEnd = if (now >= rig.expiryTimestamp) rig.expiryTimestamp else now
-                    val rigSec = ((effectiveRigEnd - savedLastTick) / 1000.0).coerceAtLeast(0.0)
-                    val dailyYield = (rig.priceUsdt * 0.15) / 30.0
-                    val offlineUsdtEarned = (dailyYield / 86400.0) * rigSec
-                    initialUsdt += offlineUsdtEarned
-                    Log.d("MiningRepository", "Accrued offline USDT for ${rig.name}: +$offlineUsdtEarned")
-                }
-            }
-        }
-
-        val defaultTx = listOf(
-            TransactionItem(
-                id = "tx-001",
-                type = TransactionType.REFERRAL_COMMISSION,
-                amount = 7.00,
-                currency = "USDT",
-                timestamp = now - 3600000 * 4,
-                status = TransactionStatus.COMPLETED,
-                description = "7% Affiliate Commission: Downline Node Purchase (Quantum Rig $100)"
-            ),
-            TransactionItem(
-                id = "tx-002",
-                type = TransactionType.MINING_PAYOUT_USDT,
-                amount = 0.38,
-                currency = "USDT",
-                timestamp = now - 3600000 * 8,
-                status = TransactionStatus.COMPLETED,
-                description = "Automated Hardware Yield Credit"
-            ),
-            TransactionItem(
-                id = "tx-003",
-                type = TransactionType.DEPOSIT,
-                amount = 25.00,
-                currency = "USDT",
-                timestamp = now - 86400000 * 2,
-                status = TransactionStatus.COMPLETED,
-                description = "Deposit confirmed via NOWPayments Gateway",
-                network = "BEP20 (BSC)",
-                txHash = "0x89f4b...39d1"
-            )
-        )
-
-        val defaultTasks = listOf(
-            MicroTaskSubmission(
-                id = "task-001",
-                platform = TaskPlatform.WHATSAPP_STATUS,
-                submittedAt = now - 86400000,
-                initialViewCount = 42,
-                finalViewCount = 185,
-                status = PromoStatus.APPROVED,
-                rewardUsdt = 3.50,
-                notes = "High engagement status verified"
-            )
-        )
-
-        return UserMiningState(
+        val rawState = UserMiningState(
             uid = key,
             secretKey = key,
             email = "miner_${key.takeLast(4).lowercase()}@hashgrid.pro",
@@ -312,30 +210,37 @@ class MiningRepository(context: Context) {
             isColdStorageSynced = true,
             minerBalanceUsdt = initialUsdt,
             gridBalance = initialGrid,
-            baseFreeHashrateGh = 1.0,
-            referralCount = 3,
-            activeReferredMiners = 2,
-            temporaryBoostHashrateGh = 0.5,
-            temporaryBoostExpiry = now + (14L * 60 * 60 * 1000),
+            baseFreeHashrateGh = 2.0,
+            referralCount = 0,
+            activeReferredMiners = 0,
+            temporaryBoostHashrateGh = 0.0,
+            temporaryBoostExpiry = 0L,
             freeMiningSessionStart = sessionStart,
             freeMiningSessionEnd = sessionEnd,
             isFreeMiningActive = isFreeActive,
             referralCode = "HG-${key.takeLast(4)}",
             dailySpentUsdt = 0.0,
             dailySpentResetDate = now,
-            lastDailySpinTimestamp = now - (20L * 60 * 60 * 1000),
-            userRigs = defaultRigs,
-            transactions = defaultTx,
-            microTasks = defaultTasks,
+            lastDailySpinTimestamp = 0L,
+            userRigs = loadedRigs,
+            transactions = emptyList(),
+            microTasks = emptyList(),
             isKeyBackedUp = isKeyBackedUp,
             isPinConfigured = isPinConfigured,
             isBiometricEnabled = isBiometricEnabled,
             isAppLocked = isPinConfigured, // Lock immediately on cold start if PIN is configured
-            lastYieldTickTimestamp = now,
+            lastYieldTickTimestamp = if (savedLastTick > 0) savedLastTick else now,
             createdAt = prefs.getLong("account_created_at", now),
             isAdmin = isMasterAdmin,
             role = userRole
         )
+
+        // 3. Apply Offline Mining Catch-Up if time elapsed
+        return if (savedLastTick > 0 && now > savedLastTick) {
+            applyOfflineCatchUpYield(rawState, now)
+        } else {
+            rawState
+        }
     }
 
     private fun startBackgroundEngine() {
@@ -441,48 +346,20 @@ class MiningRepository(context: Context) {
         securityPreferences.setSecretKeyBackedUp(false)
 
         val now = System.currentTimeMillis()
-        val defaultRigs = listOf(
-            UserRig(
-                id = "rig-starter-node-1",
-                catalogId = "starter_node",
-                name = "Starter Node",
-                priceUsdt = 10.0,
-                hashrateGh = 2.0,
-                purchaseTimestamp = now,
-                durationDays = 200,
-                status = RigStatus.ACTIVE,
-                totalReceivedUsdt = 0.0,
-                thisMonthEarnedUsdt = 0.0,
-                lastYieldCalculatedTimestamp = now
-            )
-        )
-
-        val defaultTx = listOf(
-            TransactionItem(
-                id = "tx-init-node-deposit",
-                type = TransactionType.DEPOSIT,
-                amount = 48.50,
-                currency = "USDT",
-                timestamp = now,
-                status = TransactionStatus.COMPLETED,
-                description = "Genesis Liquidity Allocation",
-                network = "BEP20 (BSC)"
-            )
-        )
 
         val newState = UserMiningState(
             uid = newKey,
             secretKey = newKey,
             email = "miner_${newKey.takeLast(4).lowercase()}@hashgrid.pro",
             nodeId = "NODE-WEB3-#${newKey.takeLast(4)}",
-            minerBalanceUsdt = 48.50,
-            gridBalance = 412.850,
-            baseFreeHashrateGh = 1.0,
-            referralCount = 3,
-            activeReferredMiners = 2,
+            minerBalanceUsdt = 0.0,
+            gridBalance = 0.0,
+            baseFreeHashrateGh = 2.0,
+            referralCount = 0,
+            activeReferredMiners = 0,
             referralCode = "HG-${newKey.takeLast(4)}",
-            userRigs = defaultRigs,
-            transactions = defaultTx,
+            userRigs = emptyList(),
+            transactions = emptyList(),
             isKeyBackedUp = false,
             isPinConfigured = false,
             isBiometricEnabled = false,
@@ -496,6 +373,7 @@ class MiningRepository(context: Context) {
 
         _userState.value = newState
         scope.launch {
+            firebaseManager.saveUserUnderSecretKey(newKey, newState)
             syncToCloud()
         }
         return Result.success(newState)
@@ -605,46 +483,19 @@ class MiningRepository(context: Context) {
             firebaseManager.saveUserUnderSecretKey(cleanKey, adminState)
             adminState
         } else {
-            val defaultRigs = listOf(
-                UserRig(
-                    id = "rig-starter-node-101",
-                    catalogId = "starter_node",
-                    name = "Starter Node #101",
-                    priceUsdt = 10.0,
-                    hashrateGh = 2.0,
-                    purchaseTimestamp = now,
-                    durationDays = 200,
-                    status = RigStatus.ACTIVE,
-                    totalReceivedUsdt = 0.0,
-                    thisMonthEarnedUsdt = 0.0,
-                    lastYieldCalculatedTimestamp = now
-                )
-            )
-            val defaultTx = listOf(
-                TransactionItem(
-                    id = "tx-init-node-deposit",
-                    type = TransactionType.DEPOSIT,
-                    amount = 48.50,
-                    currency = "USDT",
-                    timestamp = now,
-                    status = TransactionStatus.COMPLETED,
-                    description = "Genesis Liquidity Allocation",
-                    network = "BEP20 (BSC)"
-                )
-            )
             val newUserState = UserMiningState(
                 uid = cleanKey,
                 secretKey = cleanKey,
                 email = "miner_${cleanKey.takeLast(4).lowercase()}@hashgrid.pro",
                 nodeId = "NODE-WEB3-#${cleanKey.takeLast(4)}",
-                minerBalanceUsdt = 48.50,
-                gridBalance = 412.850,
-                baseFreeHashrateGh = 1.0,
-                referralCount = 3,
-                activeReferredMiners = 2,
+                minerBalanceUsdt = 0.0,
+                gridBalance = 0.0,
+                baseFreeHashrateGh = 2.0,
+                referralCount = 0,
+                activeReferredMiners = 0,
                 referralCode = "HG-${cleanKey.takeLast(4)}",
-                userRigs = defaultRigs,
-                transactions = defaultTx,
+                userRigs = emptyList(),
+                transactions = emptyList(),
                 isKeyBackedUp = true,
                 isPinConfigured = securityPreferences.isPinSet(),
                 isBiometricEnabled = securityPreferences.isBiometricEnabled(),
