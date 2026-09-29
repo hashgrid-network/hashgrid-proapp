@@ -28,12 +28,13 @@ class FirebaseManager(private val context: Context) {
 
     companion object {
         const val TAG = "FIREBASE_SYNC"
-        const val API_KEY = "AIzaSyCMDAfHJ6awiJYRDoJ1PR-UMC7yF8_kauc"
-        const val AUTH_DOMAIN = "hashgrid-c7fe4.firebaseapp.com"
-        const val PROJECT_ID = "hashgrid-c7fe4"
-        const val STORAGE_BUCKET = "hashgrid-c7fe4.firebasestorage.app"
-        const val SENDER_ID = "885427334784"
-        const val APP_ID = "1:885427334784:android:3b18fbfb14a82cb36e0065"
+        const val API_KEY = "AIzaSyBCR8ab9HAOEYRtQ1HY94fxm7FFweqsx3M"
+        const val AUTH_DOMAIN = "hashgrid-b850b.firebaseapp.com"
+        const val PROJECT_ID = "hashgrid-b850b"
+        const val STORAGE_BUCKET = "hashgrid-b850b.firebasestorage.app"
+        const val DATABASE_URL = "https://hashgrid-b850b-default-rtdb.asia-southeast1.firebasedatabase.app"
+        const val SENDER_ID = "621346408367"
+        const val APP_ID = "1:621346408367:android:c0c569afddabd2695a915a"
     }
 
     private var firestore: FirebaseFirestore? = null
@@ -57,11 +58,12 @@ class FirebaseManager(private val context: Context) {
                         .setApplicationId(APP_ID)
                         .setProjectId(PROJECT_ID)
                         .setStorageBucket(STORAGE_BUCKET)
+                        .setDatabaseUrl(DATABASE_URL)
                         .setGcmSenderId(SENDER_ID)
                         .build()
                     FirebaseApp.initializeApp(context, options)
                 }
-                Log.d(TAG, "Firebase initialized for hashgrid-c7fe4.")
+                Log.d(TAG, "Firebase initialized for hashgrid-b850b.")
             }
 
             try {

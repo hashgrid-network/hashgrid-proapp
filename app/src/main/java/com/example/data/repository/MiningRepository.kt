@@ -245,6 +245,24 @@ class MiningRepository(context: Context) {
 
     private fun startBackgroundEngine() {
         scope.launch {
+            val current = _userState.value
+            if (current.isAuthenticated && current.secretKey.isNotBlank()) {
+                try {
+                    val res = firebaseManager.restoreUserBySecretKey(current.secretKey)
+                    if (res.isSuccess && res.getOrNull() != null) {
+                        val cloudState = res.getOrThrow()!!
+                        val now = System.currentTimeMillis()
+                        val caughtUp = applyOfflineCatchUpYield(cloudState, now)
+                        _userState.value = caughtUp.copy(
+                            isPinConfigured = securityPreferences.isPinSet(),
+                            isBiometricEnabled = securityPreferences.isBiometricEnabled(),
+                            isAppLocked = securityPreferences.isPinSet()
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w("MiningRepository", "Startup cloud hydrate note: ${e.message}")
+                }
+            }
             // Initial sync to Firestore
             syncToCloud()
             while (isActive) {
