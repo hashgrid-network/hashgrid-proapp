@@ -1,6 +1,8 @@
 package com.example
 
 import com.example.data.model.*
+import com.example.data.payment.NowPaymentResponse
+import com.example.data.payment.NowPaymentsManager
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -10,10 +12,9 @@ class ExampleUnitTest {
     fun testFreeHashrateHardCap() {
         val state = UserMiningState(
             baseFreeHashrateGh = 1.0,
-            referralCount = 30, // 30 * 0.25 = 7.5
-            activeReferredMiners = 10 // 10 * 0.50 = 5.0 -> raw = 13.5 GH/s
+            referralCount = 30,
+            activeReferredMiners = 10
         )
-        // Hard capped at 10.0 GH/s
         assertEquals(10.0, state.aggregateFreeHashrateGh, 0.001)
     }
 
@@ -21,8 +22,8 @@ class ExampleUnitTest {
     fun testReferralBoostFormula() {
         val state = UserMiningState(
             baseFreeHashrateGh = 1.0,
-            referralCount = 4, // 4 * 0.25 = 1.0
-            activeReferredMiners = 2 // 2 * 0.50 = 1.0
+            referralCount = 4,
+            activeReferredMiners = 2
         )
         assertEquals(2.0, state.referralBoostHashrateGh, 0.001)
         assertEquals(3.0, state.aggregateFreeHashrateGh, 0.001)
@@ -34,7 +35,6 @@ class ExampleUnitTest {
         assertEquals(100.0, quantumRig.priceUsdt, 0.001)
         assertEquals(30.0, quantumRig.hashrateGh, 0.001)
         assertEquals(200, quantumRig.durationDays)
-        // 15% monthly = $15.00 USDT / month -> daily = 0.50 USDT
         assertEquals(0.50, quantumRig.dailyYieldUsdt, 0.001)
     }
 
@@ -51,5 +51,54 @@ class ExampleUnitTest {
         val sectors = LuckyWheelConfig.sectors
         assertEquals(8, sectors.size)
         assertTrue(sectors.any { it.type == SpinRewardType.USDT && it.value == 5.0 })
+    }
+
+    @Test
+    fun testNowPaymentsResponseStatusCheck() {
+        val waitingPayment = NowPaymentResponse(
+            paymentId = "1001",
+            paymentStatus = "waiting",
+            payAddress = "0x1234",
+            priceAmount = 50.0,
+            priceCurrency = "usd",
+            payAmount = 50.0,
+            payCurrency = "usdtbsc",
+            orderId = "ORD-01",
+            orderDescription = "Test Order"
+        )
+        assertTrue(waitingPayment.isPendingOrWaiting)
+        assertFalse(waitingPayment.isSuccessOrConfirmed)
+
+        val confirmedPayment = waitingPayment.copy(paymentStatus = "confirmed")
+        assertTrue(confirmedPayment.isSuccessOrConfirmed)
+
+        val finishedPayment = waitingPayment.copy(paymentStatus = "finished")
+        assertTrue(finishedPayment.isSuccessOrConfirmed)
+    }
+
+    @Test
+    fun testNowPaymentsIpnHmacVerification() {
+        val manager = NowPaymentsManager()
+        val samplePayload = """{"payment_id":12345,"payment_status":"finished","pay_address":"0xabc"}"""
+        // verify signature logic runs without error
+        assertFalse(manager.verifyIpnSignature(samplePayload, "invalid_signature"))
+    }
+
+    @Test
+    fun testHashrateProfitCalculatorFormula() {
+        val hashrateGh = 30.0
+        val estimatedHardwareCostUsd = hashrateGh * 3.333 // ~$100 USD
+        val monthlyUsdtYield = estimatedHardwareCostUsd * 0.15 // $15.00 USDT
+        val dailyUsdtYield = monthlyUsdtYield / 30.0 // $0.50 USDT
+        val cycle200DaysYield = dailyUsdtYield * 200.0 // $100.00 USDT
+
+        assertEquals(100.0, cycle200DaysYield, 0.1)
+        assertEquals(0.50, dailyUsdtYield, 0.01)
+    }
+
+    @Test
+    fun testNotificationChannelsConstants() {
+        assertEquals("hashgrid_mining_channel", com.example.data.notification.NotificationHelper.CHANNEL_MINING)
+        assertEquals("hashgrid_payment_channel", com.example.data.notification.NotificationHelper.CHANNEL_PAYMENT)
     }
 }

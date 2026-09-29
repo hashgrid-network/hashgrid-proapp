@@ -41,15 +41,21 @@ import com.example.ui.theme.*
 @Composable
 fun DepositDialog(
     onDismiss: () -> Unit,
+    onInitiateNowPayments: (amountUsd: Double, payCurrency: String) -> Unit,
     onConfirmDeposit: (amount: Double, network: String) -> Unit
 ) {
     val context = LocalContext.current
-    var selectedNetwork by remember { mutableStateOf("BEP20 (BSC)") }
-    var customAmount by remember { mutableStateOf("50") }
+    var selectedCryptoCode by remember { mutableStateOf("usdtbsc") }
+    var depositAmountText by remember { mutableStateOf("50") }
 
-    val bep20Address = "0x7a8F693A9a5e8e81C44F3a92C9dB8256E101Ab5c"
-    val trc20Address = "TYsQ9qLpKMZ9k2vF6T18uNx9D7K4Qx71Pa"
-    val activeAddress = if (selectedNetwork.contains("BEP20")) bep20Address else trc20Address
+    val cryptoCurrencies = listOf(
+        Triple("usdtbsc", "USDT (BSC BEP20)", "BEP20"),
+        Triple("usdttrc20", "USDT (TRON TRC20)", "TRC20"),
+        Triple("btc", "Bitcoin (BTC)", "BTC"),
+        Triple("eth", "Ethereum (ETH)", "ERC20"),
+        Triple("trx", "TRON (TRX)", "TRX"),
+        Triple("sol", "Solana (SOL)", "SOL")
+    )
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -82,13 +88,22 @@ fun DepositDialog(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "DEPOSIT USDT",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = TextGold
+                        Column {
+                            Text(
+                                text = "DEPOSIT CRYPTO",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextGold
+                                )
                             )
-                        )
+                            Text(
+                                text = "Powered by NOWPayments Gateway",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = EmeraldGlow,
+                                    fontSize = 9.5.sp
+                                )
+                            )
+                        }
                         IconButton(
                             onClick = onDismiss,
                             modifier = Modifier
@@ -101,61 +116,66 @@ fun DepositDialog(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    // Network Tabs
-                    Row(
+                    // Deposit Amount Input
+                    OutlinedTextField(
+                        value = depositAmountText,
+                        onValueChange = { depositAmountText = it },
+                        label = { Text("Deposit Amount (USD / USDT)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(DarkNavySurface)
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            .testTag("deposit_amount_field"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GoldPrimary,
+                            unfocusedBorderColor = Color(0xFF334155),
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Select Payment Cryptocurrency",
+                        style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold),
+                        modifier = Modifier.align(Alignment.Start)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Crypto selector chips
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf("BEP20 (BSC)", "TRC20 (TRON)").forEach { net ->
-                            val isSel = selectedNetwork == net
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSel) GoldPrimary else Color.Transparent)
-                                    .clickable { selectedNetwork = net }
-                                    .padding(vertical = 8.dp)
-                                    .testTag("network_tab_${net.take(5)}"),
-                                contentAlignment = Alignment.Center
+                        cryptoCurrencies.chunked(2).forEach { row ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    text = net,
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isSel) ObsidianBg else TextSecondary
-                                    )
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // QR Code Mock
-                    Box(
-                        modifier = Modifier
-                            .size(140.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.White)
-                            .padding(8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Canvas(modifier = Modifier.size(124.dp)) {
-                            // Draw decorative stylized QR grid
-                            val cellSize = size.width / 9f
-                            for (i in 0..8) {
-                                for (j in 0..8) {
-                                    if ((i in 0..2 && j in 0..2) || (i in 6..8 && j in 0..2) || (i in 0..2 && j in 6..8) || (i + j) % 3 == 0) {
-                                        drawRect(
-                                            color = Color.Black,
-                                            topLeft = Offset(i * cellSize, j * cellSize),
-                                            size = Size(cellSize * 0.9f, cellSize * 0.9f)
+                                row.forEach { (code, label, net) ->
+                                    val isSel = selectedCryptoCode == code
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSel) CardSurfaceElevated else DarkNavySurface)
+                                            .border(1.dp, if (isSel) GoldPrimary else Color(0xFF334155), RoundedCornerShape(8.dp))
+                                            .clickable { selectedCryptoCode = code }
+                                            .padding(horizontal = 8.dp, vertical = 8.dp)
+                                            .testTag("crypto_select_$code"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isSel) GoldLight else TextSecondary,
+                                                fontSize = 10.sp
+                                            ),
+                                            maxLines = 1
                                         )
                                     }
                                 }
@@ -163,45 +183,30 @@ fun DepositDialog(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Address box + copy
-                    Column(
+                    // Primary Button: Generate NOWPayments Invoice
+                    Button(
+                        onClick = {
+                            val amt = depositAmountText.toDoubleOrNull() ?: 50.0
+                            onInitiateNowPayments(amt, selectedCryptoCode)
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(DarkNavySurface)
-                            .border(1.dp, Color(0xFF334155), RoundedCornerShape(10.dp))
-                            .padding(12.dp)
+                            .height(46.dp)
+                            .testTag("nowpayments_generate_btn"),
+                        colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
+                        shape = RoundedCornerShape(10.dp)
                     ) {
+                        Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = ObsidianBg, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "OFFICIAL $selectedNetwork DEPOSIT ADDRESS",
-                            style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "${activeAddress.take(12)}...${activeAddress.takeLast(8)}",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextPrimary
-                                )
+                            text = "PAY VIA NOWPAYMENTS GATEWAY",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = ObsidianBg
                             )
-                            IconButton(
-                                onClick = {
-                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    cm.setPrimaryClip(ClipData.newPlainText("USDT Address", activeAddress))
-                                    Toast.makeText(context, "Address copied to clipboard!", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.testTag("copy_deposit_address")
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = GoldPrimary, modifier = Modifier.size(20.dp))
-                            }
-                        }
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -216,21 +221,21 @@ fun DepositDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.Info, contentDescription = "Info", tint = CyanAccent, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Security, contentDescription = "Info", tint = CyanAccent, modifier = Modifier.size(18.dp))
                         Text(
-                            text = "Send only USDT ($selectedNetwork). Minimum deposit: 10 USDT. Automatically credited after 12 block confirmations.",
-                            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 10.sp)
+                            text = "NOWPayments automatically monitors the blockchain and notifies HashGrid IPN for instant Firestore balance credit.",
+                            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.5.sp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    // Simulated Deposit Buttons for testing / instant credit
+                    // Quick Test Buttons for Instant Credit
                     Text(
-                        text = "Instant Simulation / Test Deposit",
-                        style = MaterialTheme.typography.labelSmall.copy(color = TextGold, fontWeight = FontWeight.Bold)
+                        text = "Instant Development / Test Credit",
+                        style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontWeight = FontWeight.Bold)
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -238,13 +243,13 @@ fun DepositDialog(
                     ) {
                         listOf(10.0, 25.0, 50.0, 100.0).forEach { amt ->
                             OutlinedButton(
-                                onClick = { onConfirmDeposit(amt, selectedNetwork) },
+                                onClick = { onConfirmDeposit(amt, selectedCryptoCode.uppercase()) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("test_deposit_${amt.toInt()}"),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldLight),
                                 border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary),
-                                contentPadding = PaddingValues(vertical = 6.dp)
+                                contentPadding = PaddingValues(vertical = 4.dp)
                             ) {
                                 Text("+$$amt", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
                             }
@@ -499,18 +504,9 @@ fun WithdrawalDialog(
 
 @Composable
 fun ProfitCalculatorDialog(
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onDeployNode: ((hashrateGh: Double) -> Unit)? = null
 ) {
-    var selectedRigIndex by remember { mutableIntStateOf(1) } // Pro Miner Node $25
-    var selectedDurationDays by remember { mutableIntStateOf(200) }
-
-    val rigs = DefaultRigs.catalog
-    val currentRig = rigs[selectedRigIndex]
-    val dailyUsdtYield = (currentRig.priceUsdt * 0.15) / 30.0
-    val monthlyUsdtYield = currentRig.priceUsdt * 0.15
-    val totalPeriodUsdtYield = dailyUsdtYield * selectedDurationDays
-    val totalGridEstimate = currentRig.hashrateGh * 30.24 * (selectedDurationDays / 30.0)
-
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -522,145 +518,38 @@ fun ProfitCalculatorDialog(
                 .padding(16.dp),
             contentAlignment = Alignment.Center
         ) {
-            GlassCard(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .wrapContentHeight()
-                    .padding(8.dp),
-                borderColor = GoldPrimary
+                    .verticalScroll(rememberScrollState())
             ) {
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(20.dp)
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.End
                 ) {
-                    // Header
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(Icons.Default.Calculate, contentDescription = "Calc", tint = GoldPrimary)
-                            Text(
-                                text = "PROFIT CALCULATOR",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = TextGold)
-                            )
-                        }
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(DarkNavySurface)
-                                .testTag("close_calc_dialog")
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "Select Hardware Configuration",
-                        style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary),
-                        modifier = Modifier.align(Alignment.Start)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Rigs choice list
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        rigs.forEachIndexed { index, rig ->
-                            val isSel = index == selectedRigIndex
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (isSel) CardSurfaceElevated else DarkNavySurface)
-                                    .border(1.dp, if (isSel) GoldPrimary else Color(0xFF334155), RoundedCornerShape(10.dp))
-                                    .clickable { selectedRigIndex = index }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    RadioButton(
-                                        selected = isSel,
-                                        onClick = { selectedRigIndex = index },
-                                        colors = RadioButtonDefaults.colors(selectedColor = GoldPrimary)
-                                    )
-                                    Column {
-                                        Text(rig.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary))
-                                        Text("${rig.hashrateGh} GH/s Matrix", style = MaterialTheme.typography.labelSmall.copy(color = EmeraldGlow))
-                                    }
-                                }
-                                Text(
-                                    "$${rig.priceUsdt.toInt()} USDT",
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, color = GoldLight)
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Results matrix
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(DarkNavySurface)
-                            .border(1.dp, GoldPrimary.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                            .padding(14.dp)
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Est. Monthly Yield (15% net):", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
-                                Text("+$${String.format("%.2f", monthlyUsdtYield)} USDT", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = EmeraldGlow))
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Est. Daily USDT Accrual:", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
-                                Text("+$${String.format("%.3f", dailyUsdtYield)} USDT/day", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = GoldLight))
-                            }
-                            HorizontalDivider(color = Color(0xFF334155))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text("Total Lifetime (200 Days):", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary))
-                                Text("+$${String.format("%.2f", totalPeriodUsdtYield)} USDT", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold, color = GoldLight))
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Button(
+                    IconButton(
                         onClick = onDismiss,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
-                        shape = RoundedCornerShape(12.dp)
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(DarkNavySurface)
+                            .testTag("close_calc_dialog")
                     ) {
-                        Text("CLOSE CALCULATOR", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextPrimary)
                     }
                 }
+
+                HashrateProfitCalculator(
+                    initialHashrateGh = 30.0,
+                    gridMarketPriceUsd = 0.145,
+                    onDeployNodeClicked = { gh ->
+                        onDismiss()
+                        onDeployNode?.invoke(gh)
+                    }
+                )
             }
         }
     }

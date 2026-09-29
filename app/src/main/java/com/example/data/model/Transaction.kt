@@ -13,9 +13,13 @@ enum class TransactionType {
 
 enum class TransactionStatus {
     COMPLETED,
-    PENDING_REVIEW,
+    WAITING_PAYMENT,
+    CONFIRMING,
     PROCESSING,
-    REJECTED
+    PENDING_REVIEW,
+    REJECTED,
+    FAILED,
+    EXPIRED
 }
 
 data class TransactionItem(
@@ -28,5 +32,11 @@ data class TransactionItem(
     val description: String,
     val txHash: String? = null,
     val address: String? = null,
-    val network: String? = null // "BEP20 (BSC)" or "TRC20 (TRON)"
+    val network: String? = null, // "BEP20 (BSC)", "TRC20 (TRON)", etc.
+    val paymentId: String? = null,
+    val payAddress: String? = null,
+    val payAmount: Double? = null,
+    val payCurrency: String? = null,
+    val nowPaymentsStatus: String? = null,
+    val targetRigCatalogId: String? = null // if this payment was a direct plan purchase
 )

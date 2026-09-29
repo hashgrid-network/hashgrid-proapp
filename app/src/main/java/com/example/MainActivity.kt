@@ -24,10 +24,18 @@ import com.example.ui.theme.HashGridTheme
 import com.example.ui.theme.ObsidianBg
 import kotlinx.coroutines.flow.collectLatest
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import com.example.data.notification.NotificationHelper
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        NotificationHelper.createNotificationChannels(this)
         setContent {
             HashGridTheme {
                 MainApp()
@@ -40,7 +48,22 @@ class MainActivity : ComponentActivity() {
 fun MainApp(
     viewModel: MiningViewModel = viewModel()
 ) {
+    val context = LocalContext.current
     val userState by viewModel.userState.collectAsStateWithLifecycle()
+
+    // Request Notification Permission on Android 13+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        // Notification permission state
+    }
+
+    LaunchedEffect(Unit) {
+        NotificationHelper.createNotificationChannels(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val cryptoPrices by viewModel.cryptoPrices.collectAsStateWithLifecycle()
     val currentTab by viewModel.currentTab.collectAsStateWithLifecycle()
 
@@ -53,6 +76,13 @@ fun MainApp(
     val showHowItWorks by viewModel.showHowItWorksDialog.collectAsStateWithLifecycle()
     val showTaskPolicy by viewModel.showTaskPolicyDialog.collectAsStateWithLifecycle()
 
+    // NOWPayments State
+    val activePayment by viewModel.activePaymentSession.collectAsStateWithLifecycle()
+    val showGatewayModal by viewModel.showPaymentGatewayModal.collectAsStateWithLifecycle()
+    val showSuccessDialog by viewModel.showPaymentSuccessDialog.collectAsStateWithLifecycle()
+    val lastConfirmedPayment by viewModel.lastConfirmedPayment.collectAsStateWithLifecycle()
+    val isCheckingStatus by viewModel.isCheckingPaymentStatus.collectAsStateWithLifecycle()
+
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(viewModel) {
@@ -61,6 +91,7 @@ fun MainApp(
                 is UiEvent.ShowToast -> snackbarHostState.showSnackbar(event.message)
                 is UiEvent.RigPurchased -> snackbarHostState.showSnackbar("Deployed ${event.rigName}! Monthly yield activated.")
                 is UiEvent.SpinCompleted -> snackbarHostState.showSnackbar("Won ${event.record.rewardTitle}! Credited to balance.")
+                is UiEvent.PaymentConfirmed -> snackbarHostState.showSnackbar(event.message)
             }
         }
     }
@@ -115,13 +146,17 @@ fun MainApp(
                     AppNavTab.RIGS_STORE -> RigsStoreScreen(
                         userState = userState,
                         onBuyRig = { rig -> viewModel.buyRig(rig) },
+                        onPayWithNowPayments = { rig, payCurrency ->
+                            viewModel.initiateNowPaymentsRigPurchase(rig, payCurrency)
+                        },
                         onOpenDeposit = { viewModel.showDepositDialog.value = true }
                     )
                     AppNavTab.CLOUD_MINER -> CloudMinerScreen(
                         userState = userState,
                         onStartMining = { viewModel.startFreeMining() },
                         onOpenLuckyWheel = { viewModel.showLuckyWheelDialog.value = true },
-                        onNavigateToNetwork = { viewModel.selectTab(AppNavTab.NETWORK) }
+                        onNavigateToNetwork = { viewModel.selectTab(AppNavTab.NETWORK) },
+                        onNavigateToRigsStore = { viewModel.selectTab(AppNavTab.RIGS_STORE) }
                     )
                     AppNavTab.NETWORK -> NetworkScreen(
                         userState = userState,
@@ -149,6 +184,9 @@ fun MainApp(
     if (showDeposit) {
         DepositDialog(
             onDismiss = { viewModel.showDepositDialog.value = false },
+            onInitiateNowPayments = { amount, payCurrency ->
+                viewModel.initiateNowPaymentsDeposit(amount, payCurrency)
+            },
             onConfirmDeposit = { amount, network -> viewModel.depositFunds(amount, network) }
         )
     }
@@ -173,7 +211,8 @@ fun MainApp(
 
     if (showCalculator) {
         ProfitCalculatorDialog(
-            onDismiss = { viewModel.showCalculatorDialog.value = false }
+            onDismiss = { viewModel.showCalculatorDialog.value = false },
+            onDeployNode = { viewModel.selectTab(AppNavTab.RIGS_STORE) }
         )
     }
 
@@ -204,6 +243,25 @@ fun MainApp(
     if (showTaskPolicy) {
         TaskPolicyDialog(
             onDismiss = { viewModel.showTaskPolicyDialog.value = false }
+        )
+    }
+
+    // NOWPayments In-App Gateway Modal
+    if (showGatewayModal && activePayment != null) {
+        NowPaymentsGatewayDialog(
+            payment = activePayment!!,
+            isCheckingStatus = isCheckingStatus,
+            onCheckStatus = { paymentId -> viewModel.checkPaymentStatus(paymentId) },
+            onSimulateConfirm = { paymentId -> viewModel.simulateInstantPaymentConfirm(paymentId) },
+            onDismiss = { viewModel.showPaymentGatewayModal.value = false }
+        )
+    }
+
+    // Payment Success Confirmation Modal
+    if (showSuccessDialog && lastConfirmedPayment != null) {
+        PaymentSuccessDialog(
+            payment = lastConfirmedPayment,
+            onDismiss = { viewModel.showPaymentSuccessDialog.value = false }
         )
     }
 }

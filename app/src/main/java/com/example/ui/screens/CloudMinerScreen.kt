@@ -43,6 +43,7 @@ fun CloudMinerScreen(
     onStartMining: () -> Unit,
     onOpenLuckyWheel: () -> Unit,
     onNavigateToNetwork: () -> Unit,
+    onNavigateToRigsStore: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "CoreRotation")
@@ -383,6 +384,15 @@ fun CloudMinerScreen(
                     }
                 }
             }
+        }
+
+        // Embedded Interactive Hashrate Profit Calculator with Slider UI
+        item {
+            com.example.ui.components.HashrateProfitCalculator(
+                initialHashrateGh = userState.totalAggregateHashrateGh.coerceAtLeast(6.0),
+                gridMarketPriceUsd = 0.145,
+                onDeployNodeClicked = { onNavigateToRigsStore() }
+            )
         }
 
         // Referral Boost Shortcut

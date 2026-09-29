@@ -35,12 +35,23 @@ import com.example.ui.theme.*
 fun RigsStoreScreen(
     userState: UserMiningState,
     onBuyRig: (RigCatalogItem) -> Unit,
+    onPayWithNowPayments: (RigCatalogItem, payCurrency: String) -> Unit,
     onOpenDeposit: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedSection by remember { mutableIntStateOf(0) } // 0 = Catalog, 1 = My Deployed Hardware
-    var hardwareSubFilter by remember { mutableIntStateOf(0) } // 0 = Active, 1 = Completed
+    var selectedSection by remember { mutableIntStateOf(0) }
+    var hardwareSubFilter by remember { mutableIntStateOf(0) }
     var rigToBuy by remember { mutableStateOf<RigCatalogItem?>(null) }
+    var selectedCryptoPayment by remember { mutableStateOf("usdtbsc") }
+
+    val cryptoCurrencies = listOf(
+        "usdtbsc" to "USDT (BSC)",
+        "usdttrc20" to "USDT (TRON)",
+        "btc" to "BTC",
+        "eth" to "ETH",
+        "sol" to "SOL",
+        "trx" to "TRX"
+    )
 
     LazyColumn(
         modifier = modifier
@@ -131,7 +142,6 @@ fun RigsStoreScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Non refundable notice
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -252,7 +262,7 @@ fun RigsStoreScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
-                                Text("Investment Cost", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.5.sp))
+                                Text("Deployment Cost", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.5.sp))
                                 Text(
                                     "$${rig.priceUsdt.toInt()}.00 USDT",
                                     style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold, color = GoldLight)
@@ -397,17 +407,17 @@ fun RigsStoreScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "CONFIRM NODE DEPLOYMENT",
+                        text = "DEPLOY HARDWARE NODE",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = TextGold)
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     Text(
-                        text = "You are deploying ${rig.name} (${rig.hashrateGh} GH/s) for 195–210 days.",
-                        style = MaterialTheme.typography.bodyMedium.copy(color = TextPrimary, textAlign = TextAlign.Center)
+                        text = "${rig.name} (${rig.hashrateGh} GH/s)",
+                        style = MaterialTheme.typography.headlineSmall.copy(color = TextPrimary, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Box(
                         modifier = Modifier
@@ -418,29 +428,23 @@ fun RigsStoreScreen(
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Cost:", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
+                                Text("Node Price:", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
                                 Text("$${rig.priceUsdt.toInt()}.00 USDT", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = GoldLight))
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Available Miner Balance:", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
+                                Text("Your Miner Balance:", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
                                 Text("$${String.format("%.2f", userState.minerBalanceUsdt)} USDT", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = if (hasEnoughBalance) TextEmerald else CrimsonError))
                             }
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Approx Monthly Net Yield:", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
-                                Text("~$${String.format("%.2f", rig.priceUsdt * 0.15)} USDT (15%)", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = EmeraldGlow))
+                                Text("Monthly Yield (~15%):", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
+                                Text("+$${String.format("%.2f", rig.priceUsdt * 0.15)} USDT / mo", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = EmeraldGlow))
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
-                    Text(
-                        text = "Notice: Purchases are non-refundable. Funds are deployed directly to enterprise hardware clusters.",
-                        style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.5.sp, textAlign = TextAlign.Center)
-                    )
-
-                    Spacer(modifier = Modifier.height(18.dp))
-
+                    // Option A: Pay via Wallet Balance
                     if (hasEnoughBalance) {
                         Button(
                             onClick = {
@@ -449,28 +453,68 @@ fun RigsStoreScreen(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(46.dp)
+                                .height(44.dp)
                                 .testTag("confirm_buy_rig_button"),
                             colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("CONFIRM PURCHASE & DEPLOY", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
+                            Text("PAY WITH MINER BALANCE", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
                         }
-                    } else {
-                        Button(
-                            onClick = {
-                                rigToBuy = null
-                                onOpenDeposit()
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(46.dp)
-                                .testTag("insufficient_funds_deposit_button"),
-                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldAccent),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("DEPOSIT USDT TO WALLET", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    // Option B: Pay via NOWPayments Crypto Gateway
+                    Text(
+                        text = "Or Pay Directly with Crypto (NOWPayments)",
+                        style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        cryptoCurrencies.take(4).forEach { (code, label) ->
+                            val isSel = selectedCryptoPayment == code
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSel) GoldPrimary else DarkNavySurface)
+                                    .clickable { selectedCryptoPayment = code }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = if (isSel) ObsidianBg else TextSecondary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 9.5.sp
+                                    )
+                                )
+                            }
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Button(
+                        onClick = {
+                            val targetRig = rig
+                            rigToBuy = null
+                            onPayWithNowPayments(targetRig, selectedCryptoPayment)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .testTag("nowpayments_buy_rig_btn"),
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldAccent),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = ObsidianBg, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("CRYPTO INVOICE (${selectedCryptoPayment.uppercase()})", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
