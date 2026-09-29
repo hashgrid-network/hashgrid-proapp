@@ -37,12 +37,16 @@ fun SecretKeyRestoreModal(
     var errorMessage by remember { mutableStateOf("") }
 
     fun pasteFromClipboard() {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = clipboard.primaryClip
-        if (clip != null && clip.itemCount > 0) {
-            val text = clip.getItemAt(0).text?.toString() ?: ""
-            inputKey = SecretKeyUtils.normalizeSecretKey(text)
-            errorMessage = ""
+        try {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val clip = clipboard?.primaryClip
+            if (clip != null && clip.itemCount > 0) {
+                val text = clip.getItemAt(0)?.text?.toString() ?: ""
+                inputKey = SecretKeyUtils.normalizeSecretKey(text)
+                errorMessage = ""
+            }
+        } catch (e: Throwable) {
+            errorMessage = "Clipboard unavailable: ${e.message}"
         }
     }
 

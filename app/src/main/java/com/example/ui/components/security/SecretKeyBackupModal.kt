@@ -39,11 +39,15 @@ fun SecretKeyBackupModal(
     var hasCopied by remember { mutableStateOf(false) }
 
     fun copyToClipboard() {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = ClipData.newPlainText("HashGrid Secret Key", secretKey)
-        clipboard.setPrimaryClip(clip)
-        hasCopied = true
-        Toast.makeText(context, "Secret Key Copied to Clipboard!", Toast.LENGTH_SHORT).show()
+        try {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val clip = ClipData.newPlainText("HashGrid Secret Key", secretKey)
+            clipboard?.setPrimaryClip(clip)
+            hasCopied = true
+            Toast.makeText(context, "Secret Key Copied to Clipboard!", Toast.LENGTH_SHORT).show()
+        } catch (e: Throwable) {
+            Toast.makeText(context, "Could not copy to clipboard: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     Dialog(

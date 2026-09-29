@@ -36,31 +36,64 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.util.Log
+import android.view.WindowManager
 import androidx.activity.viewModels
-import androidx.fragment.app.FragmentActivity
+import androidx.appcompat.app.AppCompatActivity
 import com.example.ui.components.security.*
 
-class MainActivity : FragmentActivity() {
+class MainActivity : AppCompatActivity() {
 
     private val viewModel: MiningViewModel by viewModels()
 
     private val screenOffReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == Intent.ACTION_SCREEN_OFF) {
-                // Physical screen turned off / locked: Trigger smart app lock
-                viewModel.lockApp()
+            try {
+                if (intent?.action == Intent.ACTION_SCREEN_OFF) {
+                    // Physical screen turned off / locked: Trigger smart app lock
+                    viewModel.lockApp()
+                }
+            } catch (e: Throwable) {
+                Log.w("MainActivity", "Error in screenOffReceiver: ${e.message}")
             }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        NotificationHelper.createNotificationChannels(this)
 
-        // Register smart screen off receiver
-        val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
-        registerReceiver(screenOffReceiver, filter)
+        // Safe FLAG_SECURE application: Only enable in Release mode (!BuildConfig.DEBUG)
+        // In Debug mode, keep FLAG_SECURE disabled so streaming emulator preview displays properly without a black screen
+        try {
+            if (!BuildConfig.DEBUG) {
+                window.setFlags(
+                    WindowManager.LayoutParams.FLAG_SECURE,
+                    WindowManager.LayoutParams.FLAG_SECURE
+                )
+            }
+        } catch (e: Throwable) {
+            Log.w("MainActivity", "Failed to apply FLAG_SECURE: ${e.message}")
+        }
+
+        enableEdgeToEdge()
+
+        try {
+            NotificationHelper.createNotificationChannels(this)
+        } catch (e: Throwable) {
+            Log.w("MainActivity", "NotificationHelper init note: ${e.message}")
+        }
+
+        // Safe registration of smart screen off receiver
+        try {
+            val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(screenOffReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(screenOffReceiver, filter)
+            }
+        } catch (e: Throwable) {
+            Log.w("MainActivity", "screenOffReceiver registration error: ${e.message}")
+        }
 
         setContent {
             HashGridTheme {
@@ -71,10 +104,13 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // If device keyguard is locked, ensure terminal is locked
-        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-        if (keyguardManager?.isKeyguardLocked == true) {
-            viewModel.lockApp()
+        try {
+            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+            if (keyguardManager?.isKeyguardLocked == true) {
+                viewModel.lockApp()
+            }
+        } catch (e: Throwable) {
+            Log.w("MainActivity", "Keyguard check note: ${e.message}")
         }
         // Note: If user minimized app (e.g. checked WhatsApp/browser) without locking the phone screen,
         // ACTION_SCREEN_OFF did not fire and isKeyguardLocked is false, so app remains unlocked upon return!
@@ -84,7 +120,7 @@ class MainActivity : FragmentActivity() {
         super.onDestroy()
         try {
             unregisterReceiver(screenOffReceiver)
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 }
 

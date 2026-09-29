@@ -2,89 +2,177 @@ package com.example.data.security
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import java.security.MessageDigest
 
 class SecurityPreferences(context: Context) {
 
-    private val prefs: SharedPreferences = context.getSharedPreferences("hashgrid_security_v2", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences = createEncryptedOrFallbackPrefs(context)
 
     companion object {
+        private const val TAG = "SecurityPreferences"
         private const val KEY_SECRET_KEY = "sec_web3_secret_key"
         private const val KEY_IS_BACKED_UP = "sec_is_key_backed_up"
         private const val KEY_PIN_HASH = "sec_pin_sha256_hash"
         private const val KEY_PIN_SALT = "sec_pin_salt"
         private const val KEY_BIOMETRIC_ENABLED = "sec_biometric_enabled"
         private const val KEY_FIRST_LAUNCH_DONE = "sec_first_launch_done"
+
+        private fun createEncryptedOrFallbackPrefs(context: Context): SharedPreferences {
+            return try {
+                val masterKey = MasterKey.Builder(context)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+
+                EncryptedSharedPreferences.create(
+                    context,
+                    "hashgrid_encrypted_security_v2",
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            } catch (e: Throwable) {
+                Log.w(TAG, "Hardware KeyStore / EncryptedSharedPreferences unavailable (${e.message}). Falling back to private SharedPreferences.")
+                try {
+                    context.getSharedPreferences("hashgrid_security_v2", Context.MODE_PRIVATE)
+                } catch (fallbackError: Throwable) {
+                    Log.e(TAG, "Standard SharedPreferences fallback failed: ${fallbackError.message}")
+                    context.getSharedPreferences("hashgrid_security_safe_fallback", Context.MODE_PRIVATE)
+                }
+            }
+        }
     }
 
     fun getSecretKey(): String? {
-        return prefs.getString(KEY_SECRET_KEY, null)
+        return try {
+            prefs.getString(KEY_SECRET_KEY, null)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error getting secretKey: ${e.message}")
+            null
+        }
     }
 
     fun setSecretKey(key: String) {
-        prefs.edit().putString(KEY_SECRET_KEY, key.trim().uppercase()).apply()
+        try {
+            prefs.edit().putString(KEY_SECRET_KEY, key.trim().uppercase()).apply()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error setting secretKey: ${e.message}")
+        }
     }
 
     fun isSecretKeyBackedUp(): Boolean {
-        return prefs.getBoolean(KEY_IS_BACKED_UP, false)
+        return try {
+            prefs.getBoolean(KEY_IS_BACKED_UP, false)
+        } catch (e: Throwable) {
+            false
+        }
     }
 
     fun setSecretKeyBackedUp(backedUp: Boolean) {
-        prefs.edit().putBoolean(KEY_IS_BACKED_UP, backedUp).apply()
+        try {
+            prefs.edit().putBoolean(KEY_IS_BACKED_UP, backedUp).apply()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error setting backedUp: ${e.message}")
+        }
     }
 
     fun isPinSet(): Boolean {
-        return !prefs.getString(KEY_PIN_HASH, null).isNullOrEmpty()
+        return try {
+            !prefs.getString(KEY_PIN_HASH, null).isNullOrEmpty()
+        } catch (e: Throwable) {
+            false
+        }
     }
 
     fun setPin(pin: String): Boolean {
         if (pin.length != 4 || !pin.all { it.isDigit() }) return false
-        val salt = System.currentTimeMillis().toString()
-        val hash = hashPin(pin, salt)
-        prefs.edit()
-            .putString(KEY_PIN_HASH, hash)
-            .putString(KEY_PIN_SALT, salt)
-            .apply()
-        return true
+        return try {
+            val salt = System.currentTimeMillis().toString()
+            val hash = hashPin(pin, salt)
+            prefs.edit()
+                .putString(KEY_PIN_HASH, hash)
+                .putString(KEY_PIN_SALT, salt)
+                .apply()
+            true
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error setting PIN: ${e.message}")
+            false
+        }
     }
 
     fun verifyPin(pin: String): Boolean {
-        val storedHash = prefs.getString(KEY_PIN_HASH, null) ?: return false
-        val salt = prefs.getString(KEY_PIN_SALT, "") ?: ""
-        val candidateHash = hashPin(pin, salt)
-        return storedHash == candidateHash
+        return try {
+            val storedHash = prefs.getString(KEY_PIN_HASH, null) ?: return false
+            val salt = prefs.getString(KEY_PIN_SALT, "") ?: ""
+            val candidateHash = hashPin(pin, salt)
+            storedHash == candidateHash
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error verifying PIN: ${e.message}")
+            false
+        }
     }
 
     fun clearPin() {
-        prefs.edit()
-            .remove(KEY_PIN_HASH)
-            .remove(KEY_PIN_SALT)
-            .apply()
+        try {
+            prefs.edit()
+                .remove(KEY_PIN_HASH)
+                .remove(KEY_PIN_SALT)
+                .apply()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error clearing PIN: ${e.message}")
+        }
     }
 
     fun isBiometricEnabled(): Boolean {
-        return prefs.getBoolean(KEY_BIOMETRIC_ENABLED, false)
+        return try {
+            prefs.getBoolean(KEY_BIOMETRIC_ENABLED, false)
+        } catch (e: Throwable) {
+            false
+        }
     }
 
     fun setBiometricEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_BIOMETRIC_ENABLED, enabled).apply()
+        try {
+            prefs.edit().putBoolean(KEY_BIOMETRIC_ENABLED, enabled).apply()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error setting biometric: ${e.message}")
+        }
     }
 
     fun isFirstLaunchDone(): Boolean {
-        return prefs.getBoolean(KEY_FIRST_LAUNCH_DONE, false)
+        return try {
+            prefs.getBoolean(KEY_FIRST_LAUNCH_DONE, false)
+        } catch (e: Throwable) {
+            false
+        }
     }
 
     fun setFirstLaunchDone(done: Boolean = true) {
-        prefs.edit().putBoolean(KEY_FIRST_LAUNCH_DONE, done).apply()
+        try {
+            prefs.edit().putBoolean(KEY_FIRST_LAUNCH_DONE, done).apply()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error setting first launch: ${e.message}")
+        }
     }
 
     fun clearAll() {
-        prefs.edit().clear().apply()
+        try {
+            prefs.edit().clear().apply()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error clearing all security prefs: ${e.message}")
+        }
     }
 
     private fun hashPin(pin: String, salt: String): String {
-        val input = "HG_SALT_${salt}_PIN_$pin"
-        val bytes = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
-        return bytes.joinToString("") { "%02x".format(it) }
+        return try {
+            val input = "HG_SALT_${salt}_PIN_$pin"
+            val bytes = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+            bytes.joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            // Safe fallback
+            pin.hashCode().toString()
+        }
     }
 }

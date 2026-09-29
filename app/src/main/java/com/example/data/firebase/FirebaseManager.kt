@@ -36,7 +36,11 @@ class FirebaseManager(private val context: Context) {
     private var firestore: FirebaseFirestore? = null
 
     init {
-        initializeFirebase()
+        try {
+            initializeFirebase()
+        } catch (e: Throwable) {
+            Log.e(TAG, "FirebaseManager init safe catch: ${e.message}", e)
+        }
     }
 
     private fun initializeFirebase() {
@@ -44,7 +48,7 @@ class FirebaseManager(private val context: Context) {
             if (FirebaseApp.getApps(context).isEmpty()) {
                 try {
                     FirebaseApp.initializeApp(context)
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     val options = FirebaseOptions.Builder()
                         .setApiKey(API_KEY)
                         .setApplicationId(APP_ID)
@@ -56,19 +60,24 @@ class FirebaseManager(private val context: Context) {
                 }
                 Log.d(TAG, "Firebase initialized for hashgrid-c7fe4.")
             }
-            val db = FirebaseFirestore.getInstance()
+
             try {
-                // Enable Offline Persistence with local cache
-                val settings = FirebaseFirestoreSettings.Builder()
-                    .setLocalCacheSettings(PersistentCacheSettings.newBuilder().build())
-                    .build()
-                db.firestoreSettings = settings
-                Log.d(TAG, "Firestore Offline Persistence enabled.")
-            } catch (e: Exception) {
-                Log.d(TAG, "Firestore settings already configured: ${e.message}")
+                val db = FirebaseFirestore.getInstance()
+                try {
+                    // Enable Offline Persistence with local cache
+                    val settings = FirebaseFirestoreSettings.Builder()
+                        .setLocalCacheSettings(PersistentCacheSettings.newBuilder().build())
+                        .build()
+                    db.firestoreSettings = settings
+                    Log.d(TAG, "Firestore Offline Persistence enabled.")
+                } catch (e: Throwable) {
+                    Log.d(TAG, "Firestore settings already configured: ${e.message}")
+                }
+                firestore = db
+                Log.d(TAG, "Firestore instance retrieved successfully.")
+            } catch (e: Throwable) {
+                Log.w(TAG, "Could not initialize Firestore on this environment: ${e.message}")
             }
-            firestore = db
-            Log.d(TAG, "Firestore instance retrieved successfully.")
 
             // Safely attempt FCM token retrieval with fallback to avoid hard failure exceptions
             try {
