@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -42,6 +43,7 @@ fun HomeScreen(
     onOpenHowItWorks: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -443,6 +445,145 @@ fun HomeScreen(
                                     )
                                 )
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Referral & Invite Friends Affiliate Card
+        item {
+            GlowingBorderCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("home_referral_banner_card"),
+                glowColor = GoldPrimary
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.GroupAdd, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(20.dp))
+                            Text(
+                                text = "INVITE & EARN 7% USDT",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = TextGold
+                                )
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(EmeraldAccent.copy(alpha = 0.2f))
+                                .border(1.dp, EmeraldAccent, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "7% COMMISSION",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextEmerald,
+                                    fontSize = 8.5.sp
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "Share your link. Earn 7% USDT instantly on downline rigs + permanent hashrate power boosts.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Link Preview Box
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(DarkNavySurface)
+                            .border(1.dp, Color(0xFF334155), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = com.example.data.security.ReferralConstants.getReferralPreview(userState.referralCode),
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = CyanAccent,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                ),
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "Code: ${userState.referralCode}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = TextGold,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Actions Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                com.example.data.security.ReferralConstants.copyReferralLink(context, userState.referralCode)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                                .testTag("home_copy_ref_link_btn"),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkNavySurface),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Copy Link", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextGold))
+                        }
+
+                        Button(
+                            onClick = {
+                                com.example.data.security.ReferralConstants.shareReferralLink(context, userState.referralCode)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                                .testTag("home_share_ref_link_btn"),
+                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = ObsidianBg, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Invite Friends", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
                         }
                     }
                 }

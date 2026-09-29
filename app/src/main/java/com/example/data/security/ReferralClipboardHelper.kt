@@ -1,8 +1,51 @@
 package com.example.data.security
 
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.util.Log
+import android.widget.Toast
+
+object ReferralConstants {
+    const val REFERRAL_BASE_URL = "https://hashgrid.online/?ref="
+
+    fun getReferralUrl(referralCode: String): String {
+        return "$REFERRAL_BASE_URL$referralCode"
+    }
+
+    fun getReferralPreview(referralCode: String): String {
+        return "hashgrid.online/?ref=$referralCode"
+    }
+
+    fun getShareMessage(referralCode: String): String {
+        return "🚀 Join HashGrid Pro and activate your Web3 cloud mining node! Use my referral link to get a bonus hashrate boost:\n${getReferralUrl(referralCode)}"
+    }
+
+    fun shareReferralLink(context: Context, referralCode: String) {
+        try {
+            val sendIntent = Intent().apply {
+                action = Intent.ACTION_SEND
+                putExtra(Intent.EXTRA_TEXT, getShareMessage(referralCode))
+                type = "text/plain"
+            }
+            context.startActivity(Intent.createChooser(sendIntent, "Share HashGrid Referral Link"))
+        } catch (e: Throwable) {
+            Log.e("ReferralShare", "Share intent failed: ${e.message}")
+        }
+    }
+
+    fun copyReferralLink(context: Context, referralCode: String) {
+        try {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val fullUrl = getReferralUrl(referralCode)
+            cm?.setPrimaryClip(ClipData.newPlainText("HashGrid Referral Link", fullUrl))
+            Toast.makeText(context, "Referral link copied to clipboard!", Toast.LENGTH_SHORT).show()
+        } catch (e: Throwable) {
+            Toast.makeText(context, "Could not copy: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
 
 object ReferralClipboardHelper {
 

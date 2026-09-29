@@ -182,4 +182,21 @@ class ExampleUnitTest {
         assertTrue(authState.secretKey.isNotBlank())
         assertTrue(com.example.data.security.SecretKeyUtils.isValidSecretKey(authState.secretKey))
     }
+
+    @Test
+    fun testReferralBaseUrlAndFormatting() {
+        val baseUrl = com.example.data.security.ReferralConstants.REFERRAL_BASE_URL
+        assertEquals("https://hashgrid.online/?ref=", baseUrl)
+
+        val code = "HG-7K9P"
+        val fullUrl = com.example.data.security.ReferralConstants.getReferralUrl(code)
+        assertEquals("https://hashgrid.online/?ref=HG-7K9P", fullUrl)
+
+        val preview = com.example.data.security.ReferralConstants.getReferralPreview(code)
+        assertEquals("hashgrid.online/?ref=HG-7K9P", preview)
+
+        val shareMsg = com.example.data.security.ReferralConstants.getShareMessage(code)
+        assertTrue(shareMsg.contains("https://hashgrid.online/?ref=HG-7K9P"))
+        assertTrue(shareMsg.contains("🚀 Join HashGrid Pro"))
+    }
 }

@@ -39,7 +39,7 @@ fun NetworkScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val inviteLink = "https://hashgrid.pro/join?ref=${userState.referralCode}"
+    val referralPreview = com.example.data.security.ReferralConstants.getReferralPreview(userState.referralCode)
 
     LazyColumn(
         modifier = modifier
@@ -123,13 +123,7 @@ fun NetworkScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             IconButton(
                                 onClick = {
-                                    try {
-                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                        cm?.setPrimaryClip(ClipData.newPlainText("Invite Link", inviteLink))
-                                        Toast.makeText(context, "Referral link copied!", Toast.LENGTH_SHORT).show()
-                                    } catch (e: Throwable) {
-                                        Toast.makeText(context, "Could not copy: ${e.message}", Toast.LENGTH_SHORT).show()
-                                    }
+                                    com.example.data.security.ReferralConstants.copyReferralLink(context, userState.referralCode)
                                 },
                                 modifier = Modifier
                                     .size(36.dp)
@@ -142,15 +136,7 @@ fun NetworkScreen(
 
                             IconButton(
                                 onClick = {
-                                    val sendIntent = Intent().apply {
-                                        action = Intent.ACTION_SEND
-                                        putExtra(
-                                            Intent.EXTRA_TEXT,
-                                            "Join HashGrid Pro cloud mining with my code ${userState.referralCode}! Get free GRID mining and deploy institutional nodes: $inviteLink"
-                                        )
-                                        type = "text/plain"
-                                    }
-                                    context.startActivity(Intent.createChooser(sendIntent, "Share HashGrid Referral Link"))
+                                    com.example.data.security.ReferralConstants.shareReferralLink(context, userState.referralCode)
                                 },
                                 modifier = Modifier
                                     .size(36.dp)
@@ -160,6 +146,80 @@ fun NetworkScreen(
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = "Share", tint = ObsidianBg, modifier = Modifier.size(18.dp))
                             }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Personal Invite Link Display with Explicit Copy / Share Actions
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF0F172A))
+                            .border(1.dp, BorderGlass, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("PERSONAL INVITE LINK", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 8.5.sp))
+                                Text(
+                                    text = referralPreview,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = CyanAccent,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.5.sp
+                                    ),
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Primary Action Buttons Row (Copy Link & Share Link)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                com.example.data.security.ReferralConstants.copyReferralLink(context, userState.referralCode)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                                .testTag("btn_copy_referral_link"),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkNavySurface),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.6f)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Copy Link", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = TextGold))
+                        }
+
+                        Button(
+                            onClick = {
+                                com.example.data.security.ReferralConstants.shareReferralLink(context, userState.referralCode)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                                .testTag("btn_share_referral_link"),
+                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = ObsidianBg, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Share Link", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold, color = ObsidianBg))
                         }
                     }
                 }

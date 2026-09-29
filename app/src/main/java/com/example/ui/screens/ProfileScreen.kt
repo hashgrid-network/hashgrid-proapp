@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -56,6 +57,7 @@ fun ProfileScreen(
 ) {
     var customPriceInput by remember(currentGridPrice) { mutableStateOf(String.format("%.2f", currentGridPrice)) }
     var showLogoutConfirmDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -413,6 +415,131 @@ fun ProfileScreen(
                             Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = EmeraldAccent, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Withdraw", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = TextEmerald))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Referral & Affiliate Program Card
+        item {
+            GlowingBorderCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("profile_referral_card"),
+                glowColor = GoldPrimary
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Hub, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(20.dp))
+                            Text(
+                                text = "AFFILIATE PROGRAM",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold, color = TextGold)
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(GoldPrimary.copy(alpha = 0.2f))
+                                .border(1.dp, GoldPrimary, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "7% DIRECT USDT",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextGold,
+                                    fontSize = 8.5.sp
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "Earn 7% USDT on all hardware node deployments by your direct downlines + permanent free hashrate boosts.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Personal Link Preview Box
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(DarkNavySurface)
+                            .border(1.dp, Color(0xFF334155), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Column {
+                            Text("PERSONAL INVITE LINK", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 8.5.sp))
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = com.example.data.security.ReferralConstants.getReferralPreview(userState.referralCode),
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = CyanAccent,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.5.sp
+                                ),
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                com.example.data.security.ReferralConstants.copyReferralLink(context, userState.referralCode)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp)
+                                .testTag("profile_copy_ref_link_btn"),
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkNavySurface),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Copy Link", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextGold))
+                        }
+
+                        Button(
+                            onClick = {
+                                com.example.data.security.ReferralConstants.shareReferralLink(context, userState.referralCode)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp)
+                                .testTag("profile_share_ref_link_btn"),
+                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = ObsidianBg, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Invite Friends", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
                         }
                     }
                 }
