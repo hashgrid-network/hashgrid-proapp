@@ -48,7 +48,9 @@ data class UserMiningState(
     val isBiometricEnabled: Boolean = false,
     val isAppLocked: Boolean = false,
     val lastYieldTickTimestamp: Long = 0L,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val isAdmin: Boolean = false,
+    val role: String = "user"
 ) {
     // Referral boost calculation: +0.25 per registration, +0.50 per active miner
     val referralBoostHashrateGh: Double

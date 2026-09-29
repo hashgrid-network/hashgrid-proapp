@@ -27,17 +27,20 @@ class MiningRepository(context: Context) {
     val nowPaymentsManager = NowPaymentsManager()
 
     companion object {
-        const val GRID_PRELAUNCH_PRICE_USD = 0.05 // Configurable static Pre-Launch rate: 1 GRID = 0.05 USDT
+        const val GRID_PRELAUNCH_PRICE_USD = 0.01 // Default Pre-Launch rate: 1 GRID = 0.01 USDT
     }
 
     private val _userState = MutableStateFlow(loadInitialState())
     val userState: StateFlow<UserMiningState> = _userState.asStateFlow()
 
+    private val _gridPriceUsd = MutableStateFlow(
+        prefs.getFloat("grid_price_usd", GRID_PRELAUNCH_PRICE_USD.toFloat()).toDouble()
+    )
+    val gridPriceUsd: StateFlow<Double> = _gridPriceUsd.asStateFlow()
+
     private val _cryptoPrices = MutableStateFlow(
         listOf(
-            CryptoTickerPrice("BTC/USDT", 98250.40, +3.42, 99100.0, 96800.0),
-            CryptoTickerPrice("ETH/USDT", 3420.85, +2.15, 3480.0, 3350.0),
-            CryptoTickerPrice("GRID/USDT", GRID_PRELAUNCH_PRICE_USD, 0.00, GRID_PRELAUNCH_PRICE_USD, GRID_PRELAUNCH_PRICE_USD)
+            CryptoTickerPrice("GRID/USDT", _gridPriceUsd.value, 0.00, _gridPriceUsd.value, _gridPriceUsd.value)
         )
     )
     val cryptoPrices: StateFlow<List<CryptoTickerPrice>> = _cryptoPrices.asStateFlow()
@@ -47,6 +50,29 @@ class MiningRepository(context: Context) {
 
     init {
         startBackgroundEngine()
+        attachSystemSettingsListener()
+    }
+
+    private fun attachSystemSettingsListener() {
+        firebaseManager.listenToSystemSettings { newPrice ->
+            if (newPrice > 0.0) {
+                _gridPriceUsd.value = newPrice
+                prefs.edit().putFloat("grid_price_usd", newPrice.toFloat()).apply()
+                _cryptoPrices.value = listOf(
+                    CryptoTickerPrice("GRID/USDT", newPrice, 0.00, newPrice, newPrice)
+                )
+            }
+        }
+    }
+
+    suspend fun updateGridPrice(newPrice: Double): Boolean {
+        if (newPrice <= 0.0) return false
+        _gridPriceUsd.value = newPrice
+        prefs.edit().putFloat("grid_price_usd", newPrice.toFloat()).apply()
+        _cryptoPrices.value = listOf(
+            CryptoTickerPrice("GRID/USDT", newPrice, 0.00, newPrice, newPrice)
+        )
+        return firebaseManager.updateGridPrice(newPrice)
     }
 
     private fun loadInitialState(): UserMiningState {
@@ -62,6 +88,8 @@ class MiningRepository(context: Context) {
         val isPinConfigured = securityPreferences.isPinSet()
         val isBiometricEnabled = securityPreferences.isBiometricEnabled()
         val isKeyBackedUp = securityPreferences.isSecretKeyBackedUp()
+        val isMasterAdmin = SecretKeyUtils.isMasterAdminKey(key)
+        val userRole = if (isMasterAdmin) "superadmin" else "user"
 
         // 2. Load Local Balances or defaults
         val defaultGrid = 412.850
@@ -209,7 +237,9 @@ class MiningRepository(context: Context) {
             isBiometricEnabled = isBiometricEnabled,
             isAppLocked = isPinConfigured, // Lock immediately on cold start if PIN is configured
             lastYieldTickTimestamp = now,
-            createdAt = prefs.getLong("account_created_at", now)
+            createdAt = prefs.getLong("account_created_at", now),
+            isAdmin = isMasterAdmin,
+            role = userRole
         )
     }
 
@@ -217,49 +247,10 @@ class MiningRepository(context: Context) {
         scope.launch {
             // Initial sync to Firestore
             syncToCloud()
-            fetchCoinGeckoRates()
-            var secondCounter = 0
             while (isActive) {
                 delay(1000)
                 tickSecond()
-                secondCounter++
-                if (secondCounter % 60 == 0) {
-                    fetchCoinGeckoRates()
-                }
             }
-        }
-    }
-
-    private suspend fun fetchCoinGeckoRates() = withContext(Dispatchers.IO) {
-        try {
-            val request = okhttp3.Request.Builder()
-                .url("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true")
-                .header("Accept", "application/json")
-                .build()
-            val response = nowPaymentsManager.client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val body = response.body?.string()
-                if (!body.isNullOrBlank()) {
-                    val json = org.json.JSONObject(body)
-                    val btcObj = json.optJSONObject("bitcoin")
-                    val ethObj = json.optJSONObject("ethereum")
-
-                    val btcPrice = btcObj?.optDouble("usd", 98250.0) ?: 98250.0
-                    val btcChange = btcObj?.optDouble("usd_24h_change", 2.1) ?: 2.1
-
-                    val ethPrice = ethObj?.optDouble("usd", 3420.0) ?: 3420.0
-                    val ethChange = ethObj?.optDouble("usd_24h_change", 1.5) ?: 1.5
-
-                    _cryptoPrices.value = listOf(
-                        CryptoTickerPrice("BTC/USDT", btcPrice, btcChange, btcPrice * 1.02, btcPrice * 0.98),
-                        CryptoTickerPrice("ETH/USDT", ethPrice, ethChange, ethPrice * 1.02, ethPrice * 0.98),
-                        CryptoTickerPrice("GRID/USDT", GRID_PRELAUNCH_PRICE_USD, 0.0, GRID_PRELAUNCH_PRICE_USD, GRID_PRELAUNCH_PRICE_USD)
-                    )
-                    Log.d("MiningRepository", "CoinGecko prices updated: BTC=$btcPrice, ETH=$ethPrice, GRID=$GRID_PRELAUNCH_PRICE_USD")
-                }
-            }
-        } catch (e: Exception) {
-            Log.w("MiningRepository", "CoinGecko price fetch note: ${e.message}")
         }
     }
 
@@ -319,15 +310,6 @@ class MiningRepository(context: Context) {
         if (now - lastCloudSyncTime > 20000) {
             lastCloudSyncTime = now
             syncToCloud()
-        }
-
-        if (Random.nextInt(5) == 0) {
-            val prices = _cryptoPrices.value.map { ticker ->
-                val jitter = (Random.nextDouble() - 0.49) * 0.0008 * ticker.price
-                val newPrice = (ticker.price + jitter).coerceAtLeast(0.01)
-                ticker.copy(price = newPrice)
-            }
-            _cryptoPrices.value = prices
         }
     }
 
@@ -404,6 +386,9 @@ class MiningRepository(context: Context) {
                 } else rig
             }
 
+            val isMasterAdmin = SecretKeyUtils.isMasterAdminKey(cleanKey) || restored.isAdmin
+            val userRole = if (isMasterAdmin) "superadmin" else restored.role
+
             val finalState = restored.copy(
                 secretKey = cleanKey,
                 gridBalance = newGrid,
@@ -414,7 +399,9 @@ class MiningRepository(context: Context) {
                 isKeyBackedUp = true,
                 isPinConfigured = securityPreferences.isPinSet(),
                 isBiometricEnabled = securityPreferences.isBiometricEnabled(),
-                isAppLocked = false
+                isAppLocked = false,
+                isAdmin = isMasterAdmin,
+                role = userRole
             )
 
             securityPreferences.setSecretKey(cleanKey)
@@ -985,6 +972,71 @@ class MiningRepository(context: Context) {
             minerBalanceUsdt = current.minerBalanceUsdt + rewardSum,
             microTasks = updatedTasks,
             transactions = updatedTx
+        )
+        syncToCloud()
+    }
+
+    // ==========================================
+    // SUPER ADMIN ACTIONS
+    // ==========================================
+
+    fun adminApproveWithdrawal(txId: String) {
+        val current = _userState.value
+        val updatedTx = current.transactions.map { tx ->
+            if (tx.id == txId) {
+                tx.copy(
+                    status = TransactionStatus.COMPLETED,
+                    description = "${tx.description} (Approved by Super Admin)"
+                )
+            } else tx
+        }
+        _userState.value = current.copy(transactions = updatedTx)
+        syncToCloud()
+    }
+
+    fun adminRejectWithdrawal(txId: String) {
+        val current = _userState.value
+        val txToReject = current.transactions.find { it.id == txId }
+        val refundAmount = if (txToReject != null && txToReject.status != TransactionStatus.COMPLETED) txToReject.amount else 0.0
+        val updatedTx = current.transactions.map { tx ->
+            if (tx.id == txId) {
+                tx.copy(
+                    status = TransactionStatus.FAILED,
+                    description = "${tx.description} (Rejected - Funds Refunded)"
+                )
+            } else tx
+        }
+        _userState.value = current.copy(
+            minerBalanceUsdt = current.minerBalanceUsdt + refundAmount,
+            transactions = updatedTx
+        )
+        syncToCloud()
+    }
+
+    fun adminAdjustUserBalance(newGrid: Double, newUsdt: Double) {
+        val current = _userState.value
+        _userState.value = current.copy(
+            gridBalance = newGrid.coerceAtLeast(0.0),
+            minerBalanceUsdt = newUsdt.coerceAtLeast(0.0)
+        )
+        syncToCloud()
+    }
+
+    fun adminCreateTestPendingWithdrawal(amount: Double = 25.0, address: String = "0x71C...B42a", network: String = "BEP20 (BSC)") {
+        val current = _userState.value
+        val tx = TransactionItem(
+            id = "tx-admin-wd-${UUID.randomUUID().toString().take(6)}",
+            type = TransactionType.WITHDRAWAL,
+            amount = amount,
+            currency = "USDT",
+            timestamp = System.currentTimeMillis(),
+            status = TransactionStatus.PENDING_REVIEW,
+            description = "Withdrawal to $address ($network)",
+            address = address,
+            network = network
+        )
+        _userState.value = current.copy(
+            transactions = listOf(tx) + current.transactions
         )
         syncToCloud()
     }

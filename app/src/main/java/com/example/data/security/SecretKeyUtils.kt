@@ -42,4 +42,15 @@ object SecretKeyUtils {
         }
         return clean
     }
+
+    val MASTER_ADMIN_KEYS = listOf("HG-ADM9-7788-5544-0001")
+
+    /**
+     * Checks if the given key is a recognized Master Super Admin key
+     */
+    fun isMasterAdminKey(input: String?): Boolean {
+        if (input.isNullOrBlank()) return false
+        val normalized = normalizeSecretKey(input)
+        return MASTER_ADMIN_KEYS.any { it.equals(normalized, ignoreCase = true) }
+    }
 }

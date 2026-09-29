@@ -96,7 +96,7 @@ class ExampleUnitTest {
 
     @Test
     fun testGridPreLaunchPriceConstant() {
-        assertEquals(0.05, com.example.data.repository.MiningRepository.GRID_PRELAUNCH_PRICE_USD, 0.0001)
+        assertEquals(0.01, com.example.data.repository.MiningRepository.GRID_PRELAUNCH_PRICE_USD, 0.0001)
     }
 
     @Test
@@ -111,5 +111,44 @@ class ExampleUnitTest {
 
         assertFalse(com.example.data.security.SecretKeyUtils.isValidSecretKey("INVALID-KEY"))
         assertFalse(com.example.data.security.SecretKeyUtils.isValidSecretKey("HG-1234-5678"))
+    }
+
+    @Test
+    fun testMasterAdminKeyRecognition() {
+        val masterKey = "HG-ADM9-7788-5544-0001"
+        assertTrue(com.example.data.security.SecretKeyUtils.isMasterAdminKey(masterKey))
+        assertTrue(com.example.data.security.SecretKeyUtils.isMasterAdminKey("hg-adm9-7788-5544-0001"))
+        assertTrue(com.example.data.security.SecretKeyUtils.isMasterAdminKey(" HG-ADM9-7788-5544-0001 "))
+        assertFalse(com.example.data.security.SecretKeyUtils.isMasterAdminKey("HG-USER-1234-5678-9012"))
+        assertFalse(com.example.data.security.SecretKeyUtils.isMasterAdminKey(null))
+        assertFalse(com.example.data.security.SecretKeyUtils.isMasterAdminKey(""))
+    }
+
+    @Test
+    fun testMasterAdminStatePrivileges() {
+        val masterAdminKey = "HG-ADM9-7788-5544-0001"
+        val isMasterAdmin = com.example.data.security.SecretKeyUtils.isMasterAdminKey(masterAdminKey)
+        val adminState = UserMiningState(
+            secretKey = masterAdminKey,
+            isAdmin = isMasterAdmin,
+            role = if (isMasterAdmin) "superadmin" else "user"
+        )
+        assertTrue(adminState.isAdmin)
+        assertEquals("superadmin", adminState.role)
+    }
+
+    @Test
+    fun testCalculatorGridRateAndValuation() {
+        val hashrateGh = 400.0
+        val dailyRatePerGh = 0.5
+        val dailyGridCoins = hashrateGh * dailyRatePerGh
+        val monthlyGridCoins = dailyGridCoins * 30.0
+        val gridPriceUsd = 0.01
+
+        assertEquals(200.0, dailyGridCoins, 0.001)
+        assertEquals(6000.0, monthlyGridCoins, 0.001)
+
+        val monthlyGridValueUsd = monthlyGridCoins * gridPriceUsd
+        assertEquals(60.0, monthlyGridValueUsd, 0.001)
     }
 }

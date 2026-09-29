@@ -33,6 +33,7 @@ import com.example.ui.theme.*
 @Composable
 fun HomeScreen(
     userState: UserMiningState,
+    gridPriceUsd: Double = 0.01,
     onNavigateToTab: (AppNavTab) -> Unit,
     onOpenDeposit: () -> Unit,
     onOpenWithdraw: () -> Unit,
@@ -108,7 +109,7 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.height(14.dp))
 
                     // Total Estimated Portfolio Value Header
-                    val gridPreLaunchUsdValue = userState.gridBalance * 0.05
+                    val gridPreLaunchUsdValue = userState.gridBalance * gridPriceUsd
                     val totalPortfolioUsd = userState.minerBalanceUsdt + gridPreLaunchUsdValue
 
                     Row(
@@ -144,7 +145,7 @@ fun HomeScreen(
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "PRE-LAUNCH: $0.05 / GRID",
+                                text = "PRE-LAUNCH: $${String.format("%.2f", gridPriceUsd)} / GRID",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = CyanAccent,
@@ -233,7 +234,7 @@ fun HomeScreen(
                                 )
                             )
                             Text(
-                                text = "≈ $${String.format("%.2f", gridPreLaunchUsdValue)} USD (@ $0.05)",
+                                text = "≈ $${String.format("%.2f", gridPreLaunchUsdValue)} USD (@ $${String.format("%.2f", gridPriceUsd)})",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = TextGold,
                                     fontSize = 9.sp
@@ -584,85 +585,6 @@ fun HomeScreen(
                             Text("${rig.daysRemaining()} Days Remaining", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.5.sp))
                             Text("~15% Monthly Yield", style = MaterialTheme.typography.labelSmall.copy(color = TextGold, fontSize = 9.5.sp))
                         }
-                    }
-                }
-            }
-        }
-
-        // Recent Activity Stream
-        item {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "RECENT ACTIVITY STREAM",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-            )
-        }
-
-        if (userState.transactions.isEmpty()) {
-            item {
-                Text("No transactions recorded yet.", style = MaterialTheme.typography.bodySmall.copy(color = TextMuted))
-            }
-        } else {
-            items(userState.transactions.take(5)) { tx ->
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            val icon = when (tx.type) {
-                                TransactionType.DEPOSIT -> Icons.Default.ArrowDownward
-                                TransactionType.WITHDRAWAL -> Icons.Default.ArrowUpward
-                                TransactionType.REFERRAL_COMMISSION -> Icons.Default.Hub
-                                TransactionType.MINING_PAYOUT_USDT -> Icons.Default.Bolt
-                                TransactionType.LUCKY_SPIN_REWARD -> Icons.Default.Stars
-                                else -> Icons.Default.Receipt
-                            }
-                            val tint = when (tx.type) {
-                                TransactionType.DEPOSIT, TransactionType.REFERRAL_COMMISSION, TransactionType.MINING_PAYOUT_USDT -> EmeraldAccent
-                                TransactionType.WITHDRAWAL -> GoldPrimary
-                                else -> CyanAccent
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(CircleShape)
-                                    .background(tint.copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
-                            }
-
-                            Column(modifier = Modifier.widthIn(max = 200.dp)) {
-                                Text(
-                                    text = tx.description,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold, color = TextPrimary),
-                                    maxLines = 1
-                                )
-                                Text(
-                                    text = tx.status.name.replace("_", " "),
-                                    style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp)
-                                )
-                            }
-                        }
-
-                        Text(
-                            text = "${if (tx.type == TransactionType.WITHDRAWAL || tx.type == TransactionType.RIG_PURCHASE) "-" else "+"}${String.format("%.2f", tx.amount)} ${tx.currency}",
-                            style = MaterialTheme.typography.labelLarge.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = if (tx.type == TransactionType.WITHDRAWAL) CrimsonError else GoldLight
-                            )
-                        )
                     }
                 }
             }

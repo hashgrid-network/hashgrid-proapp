@@ -36,6 +36,18 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
 
     val userState: StateFlow<UserMiningState> = repository.userState
     val cryptoPrices: StateFlow<List<CryptoTickerPrice>> = repository.cryptoPrices
+    val gridPriceUsd: StateFlow<Double> = repository.gridPriceUsd
+
+    fun updateGridPrice(newPrice: Double) {
+        viewModelScope.launch {
+            val success = repository.updateGridPrice(newPrice)
+            if (success) {
+                _uiEvents.emit(UiEvent.ShowToast("GRID Token Price updated to $${String.format("%.2f", newPrice)} USD across network!"))
+            } else {
+                _uiEvents.emit(UiEvent.ShowToast("Updated locally to $${String.format("%.2f", newPrice)} USD (Firestore sync failed)"))
+            }
+        }
+    }
 
     private val _currentTab = MutableStateFlow(AppNavTab.CLOUD_MINER)
     val currentTab: StateFlow<AppNavTab> = _currentTab.asStateFlow()
@@ -57,6 +69,7 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     val showSecretKeyBackupModal = MutableStateFlow(false)
     val showSecretKeyRestoreModal = MutableStateFlow(false)
     val showPinSetupModal = MutableStateFlow(false)
+    val showAdminControlHubDialog = MutableStateFlow(false)
     val isRestoringAccount = MutableStateFlow(false)
 
     // NOWPayments Gateway State
@@ -313,6 +326,26 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
                 emitToast(result.exceptionOrNull()?.message ?: "Account restoration failed.")
             }
         }
+    }
+
+    fun adminApproveWithdrawal(txId: String) {
+        repository.adminApproveWithdrawal(txId)
+        emitToast("Super Admin: Withdrawal approved! Marked COMPLETED.")
+    }
+
+    fun adminRejectWithdrawal(txId: String) {
+        repository.adminRejectWithdrawal(txId)
+        emitToast("Super Admin: Withdrawal rejected and funds refunded.")
+    }
+
+    fun adminAdjustUserBalance(newGrid: Double, newUsdt: Double) {
+        repository.adminAdjustUserBalance(newGrid, newUsdt)
+        emitToast("Super Admin: Balances updated to $newGrid GRID / $$newUsdt USDT.")
+    }
+
+    fun adminCreateTestPendingWithdrawal() {
+        repository.adminCreateTestPendingWithdrawal()
+        emitToast("Super Admin: Created test pending withdrawal of 25.00 USDT.")
     }
 
     private fun emitToast(msg: String) {

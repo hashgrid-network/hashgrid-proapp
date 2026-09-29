@@ -13,11 +13,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
@@ -25,14 +23,14 @@ import com.example.ui.theme.*
 @Composable
 fun HashrateProfitCalculator(
     initialHashrateGh: Double = 30.0,
-    gridMarketPriceUsd: Double = 0.05,
+    gridMarketPriceUsd: Double = 0.01,
     onDeployNodeClicked: ((hashrateGh: Double) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var hashrateGh by remember { mutableFloatStateOf(initialHashrateGh.toFloat().coerceIn(1f, 500f)) }
     var selectedTabPeriod by remember { mutableIntStateOf(2) } // 0 = Daily, 1 = Weekly, 2 = Monthly, 3 = 200-Day Cycle
 
-    // Presets
+    // Quick presets
     val presets = listOf(
         "1 GH/s" to 1f,
         "6 GH/s" to 6f,
@@ -41,17 +39,18 @@ fun HashrateProfitCalculator(
         "400 GH/s" to 400f
     )
 
-    // Yield Calculations
-    // 1 GH/s corresponds to approx $3.33 of hardware value at standard enterprise density (e.g. $10 for 2 GH/s, $100 for 30 GH/s)
+    // Hardware cost calculation (400 GH/s corresponds to $1,333.20 node hardware cost)
     val estimatedHardwareCostUsd = (hashrateGh * 3.333).toDouble()
-    // Monthly yield is 15% net yield in USDT
+
+    // 15% Monthly Yield in USDT
     val monthlyUsdtYield = estimatedHardwareCostUsd * 0.15
     val dailyUsdtYield = monthlyUsdtYield / 30.0
     val weeklyUsdtYield = dailyUsdtYield * 7.0
     val cycle200DaysUsdtYield = dailyUsdtYield * 200.0
 
-    // Mined GRID coins formula: 1 GH/s produces approx 30.24 GRID / day in the quantum core
-    val dailyGridCoins = (hashrateGh * 30.24).toDouble()
+    // Realistic GRID Token Production Formula:
+    // Base Rate: 1 GH/s produces 0.5 GRID per day (24 hours).
+    val dailyGridCoins = (hashrateGh * 0.5).toDouble()
     val weeklyGridCoins = dailyGridCoins * 7.0
     val monthlyGridCoins = dailyGridCoins * 30.0
     val cycle200DaysGridCoins = dailyGridCoins * 200.0
@@ -64,7 +63,9 @@ fun HashrateProfitCalculator(
         else -> Quadruple("200-Day Full Cycle Return", cycle200DaysUsdtYield, cycle200DaysGridCoins, 200)
     }
 
+    // Value calculation (@ $0.05 USDT base price)
     val gridValueInUsd = periodGrid * gridMarketPriceUsd
+    // Combined Estimated Value = USDT Miner Yield + (Mined GRID * 0.05)
     val totalEstimatedValueUsd = periodUsdt + gridValueInUsd
 
     GlassCard(
@@ -78,19 +79,20 @@ fun HashrateProfitCalculator(
                 .fillMaxWidth()
                 .padding(18.dp)
         ) {
-            // Title & Live Market Rate Tag
+            // Header Row: Title on Left, Single-Line Pre-Launch Pill on Right
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
+                    modifier = Modifier.weight(1f, fill = false),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
                             .background(GoldPrimary.copy(alpha = 0.2f))
                             .border(1.dp, GoldPrimary, CircleShape),
@@ -100,7 +102,7 @@ fun HashrateProfitCalculator(
                             Icons.Default.Calculate,
                             contentDescription = "Calculator",
                             tint = GoldPrimary,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                     Column {
@@ -108,33 +110,42 @@ fun HashrateProfitCalculator(
                             text = "HASHRATE YIELD CALCULATOR",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.ExtraBold,
-                                color = TextGold
-                            )
+                                color = TextGold,
+                                fontSize = 13.5.sp
+                            ),
+                            maxLines = 1
                         )
                         Text(
-                            text = "Simulate 15% monthly USDT yield + GRID token power",
+                            text = "Simulate 15% monthly USDT yield + GRID power",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 color = TextSecondary,
-                                fontSize = 9.5.sp
-                            )
+                                fontSize = 9.sp
+                            ),
+                            maxLines = 1
                         )
                     }
                 }
 
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // Compact Single-Line Pre-Launch Pill Badge (never breaks into multiple lines)
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
                         .background(DarkNavySurface)
-                        .border(1.dp, CyanAccent, RoundedCornerShape(12.dp))
+                        .border(1.dp, CyanAccent.copy(alpha = 0.8f), RoundedCornerShape(12.dp))
                         .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .testTag("calc_pre_launch_badge")
                 ) {
                     Text(
-                        text = "PRE-LAUNCH: $0.05 / GRID",
+                        text = "PRE-LAUNCH: $${String.format("%.2f", gridMarketPriceUsd)} / GRID",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
                             color = CyanAccent,
                             fontSize = 9.5.sp
-                        )
+                        ),
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
@@ -266,7 +277,7 @@ fun HashrateProfitCalculator(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Period Switcher (Daily, Weekly, Monthly, 200-Day Cycle)
+            // Period Switcher (Daily, Weekly, Monthly, 200-Days)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()

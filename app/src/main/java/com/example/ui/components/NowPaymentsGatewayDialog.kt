@@ -310,9 +310,13 @@ fun NowPaymentsGatewayDialog(
                             )
                             IconButton(
                                 onClick = {
-                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    cm.setPrimaryClip(ClipData.newPlainText("Deposit Address", payment.payAddress))
-                                    Toast.makeText(context, "Address copied to clipboard!", Toast.LENGTH_SHORT).show()
+                                    try {
+                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                        cm?.setPrimaryClip(ClipData.newPlainText("Deposit Address", payment.payAddress))
+                                        Toast.makeText(context, "Address copied to clipboard!", Toast.LENGTH_SHORT).show()
+                                    } catch (e: Throwable) {
+                                        Toast.makeText(context, "Could not copy: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
                                 },
                                 modifier = Modifier
                                     .size(32.dp)

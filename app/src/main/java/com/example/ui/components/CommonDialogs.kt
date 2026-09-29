@@ -505,6 +505,7 @@ fun WithdrawalDialog(
 @Composable
 fun ProfitCalculatorDialog(
     onDismiss: () -> Unit,
+    gridPriceUsd: Double = 0.01,
     onDeployNode: ((hashrateGh: Double) -> Unit)? = null
 ) {
     Dialog(
@@ -544,7 +545,7 @@ fun ProfitCalculatorDialog(
 
                 HashrateProfitCalculator(
                     initialHashrateGh = 30.0,
-                    gridMarketPriceUsd = 0.145,
+                    gridMarketPriceUsd = gridPriceUsd,
                     onDeployNodeClicked = { gh ->
                         onDismiss()
                         onDeployNode?.invoke(gh)

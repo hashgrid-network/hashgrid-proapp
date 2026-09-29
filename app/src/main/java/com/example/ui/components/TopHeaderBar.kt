@@ -1,27 +1,16 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,214 +21,126 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CryptoTickerPrice
 import com.example.ui.theme.*
-import kotlinx.coroutines.delay
 
 @Composable
 fun TopHeaderBar(
     nodeId: String,
     isColdStorageSynced: Boolean,
-    tickers: List<CryptoTickerPrice>,
+    preLaunchPriceUsd: Double = 0.01,
+    tickers: List<CryptoTickerPrice> = emptyList(),
     modifier: Modifier = Modifier
 ) {
-    var currentTickerIndex by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(tickers) {
-        while (true) {
-            delay(3500)
-            if (tickers.isNotEmpty()) {
-                currentTickerIndex = (currentTickerIndex + 1) % tickers.size
-            }
-        }
-    }
-
-    Column(
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .background(ObsidianBg.copy(alpha = 0.95f))
-            .padding(top = 8.dp, start = 16.dp, end = 16.dp, bottom = 8.dp)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        // Ticker Bar (Institutional Live Feeds)
+        // Left: Institutional Node ID & Cold Storage Sync Status Badge
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(DarkNavySurface)
-                .border(0.5.dp, Color(0xFF1E293B), RoundedCornerShape(8.dp))
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.weight(1f, fill = false),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(GoldPrimary.copy(alpha = 0.15f))
+                    .border(1.dp, GoldPrimary.copy(alpha = 0.4f), CircleShape),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(EmeraldAccent)
+                Icon(
+                    imageVector = Icons.Default.Shield,
+                    contentDescription = "Node Shield",
+                    tint = GoldPrimary,
+                    modifier = Modifier.size(16.dp)
                 )
+            }
+            Column {
                 Text(
-                    text = "LIVE MARKET",
+                    text = "INSTITUTIONAL NODE",
                     style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextMuted
+                        fontSize = 8.5.sp,
+                        color = TextMuted,
+                        letterSpacing = 0.8.sp
                     )
                 )
-            }
-
-            if (tickers.isNotEmpty()) {
-                val currentTicker = tickers[currentTickerIndex.coerceIn(0, tickers.size - 1)]
-                AnimatedContent(
-                    targetState = currentTicker,
-                    transitionSpec = { fadeIn() togetherWith fadeOut() },
-                    label = "TickerAnimation"
-                ) { ticker ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = ticker.symbol,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = TextPrimary
-                            )
-                        )
-                        if (ticker.symbol.startsWith("GRID")) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(CyanAccent.copy(alpha = 0.15f))
-                                    .border(0.5.dp, CyanAccent, RoundedCornerShape(4.dp))
-                                    .padding(horizontal = 4.dp, vertical = 1.dp)
-                            ) {
-                                Text(
-                                    text = "PRE-LAUNCH",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = CyanAccent,
-                                        fontSize = 8.sp
-                                    )
-                                )
-                            }
-                        }
-                        Text(
-                            text = if (ticker.symbol.startsWith("GRID")) {
-                                "$${String.format("%.2f", ticker.price)}"
-                            } else {
-                                "$${String.format("%,.2f", ticker.price)}"
-                            },
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                color = GoldLight
-                            )
-                        )
-                        val isPositive = ticker.change24h >= 0
-                        if (!ticker.symbol.startsWith("GRID")) {
-                            Text(
-                                text = "${if (isPositive) "+" else ""}${String.format("%.2f", ticker.change24h)}%",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isPositive) EmeraldAccent else CrimsonError,
-                                    fontSize = 10.sp
-                                )
-                            )
-                        } else {
-                            Text(
-                                text = "Fixed $0.05",
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextEmerald,
-                                    fontSize = 9.sp
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Node ID & Cold Storage Sync Status
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(GoldPrimary.copy(alpha = 0.15f))
-                        .border(1.dp, GoldPrimary.copy(alpha = 0.4f), CircleShape),
-                    contentAlignment = Alignment.Center
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Shield,
-                        contentDescription = "Node Shield",
-                        tint = GoldPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-                Column {
-                    Text(
-                        text = "INSTITUTIONAL NODE",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 8.5.sp,
-                            color = TextMuted,
-                            letterSpacing = 0.8.sp
-                        )
-                    )
                     Text(
                         text = nodeId,
                         style = MaterialTheme.typography.labelLarge.copy(
                             fontWeight = FontWeight.Bold,
                             color = TextPrimary
                         ),
+                        maxLines = 1,
                         modifier = Modifier.testTag("node_id_badge")
                     )
+                    Text(
+                        text = "•",
+                        style = MaterialTheme.typography.labelSmall.copy(color = TextMuted)
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        modifier = Modifier.testTag("cold_storage_badge")
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (isColdStorageSynced) EmeraldAccent else Color.Gray)
+                        )
+                        Text(
+                            text = if (isColdStorageSynced) "Cold-Storage Synced" else "Syncing...",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isColdStorageSynced) TextEmerald else TextMuted,
+                                fontSize = 10.sp
+                            ),
+                            maxLines = 1
+                        )
+                    }
                 }
             }
+        }
 
-            // Cold storage badge
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(if (isColdStorageSynced) EmeraldDark.copy(alpha = 0.4f) else DarkNavySurface)
-                    .border(
-                        1.dp,
-                        if (isColdStorageSynced) EmeraldAccent.copy(alpha = 0.5f) else Color.Gray.copy(alpha = 0.3f),
-                        RoundedCornerShape(20.dp)
-                    )
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                    .testTag("cold_storage_badge")
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Right: Single-line compact pill badge "PRE-LAUNCH: $0.05 / GRID"
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(DarkNavySurface)
+                .border(1.dp, CyanAccent.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
+                .padding(horizontal = 9.dp, vertical = 5.dp)
+                .testTag("pre_launch_badge")
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(if (isColdStorageSynced) EmeraldAccent else Color.Gray)
-                    )
-                    Text(
-                        text = if (isColdStorageSynced) "Cold-Storage Synced" else "Syncing...",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (isColdStorageSynced) TextEmerald else TextMuted,
-                            fontSize = 10.sp
-                        )
-                    )
-                }
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(CyanAccent)
+                )
+                Text(
+                    text = "PRE-LAUNCH: $${String.format("%.2f", preLaunchPriceUsd)} / GRID",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        color = CyanAccent,
+                        fontSize = 9.5.sp
+                    ),
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
         }
     }

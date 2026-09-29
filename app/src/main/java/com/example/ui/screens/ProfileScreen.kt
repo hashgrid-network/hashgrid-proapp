@@ -10,10 +10,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
@@ -32,6 +34,8 @@ import com.example.ui.theme.*
 @Composable
 fun ProfileScreen(
     userState: UserMiningState,
+    currentGridPrice: Double = 0.01,
+    onUpdateGridPrice: (Double) -> Unit = {},
     onOpenDeposit: () -> Unit,
     onOpenWithdraw: () -> Unit,
     onOpenLuckyWheel: () -> Unit,
@@ -46,8 +50,10 @@ fun ProfileScreen(
     onOpenPinSetup: () -> Unit = {},
     onToggleBiometric: (Boolean) -> Unit = {},
     onLockAppNow: () -> Unit = {},
+    onOpenAdminControlHub: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var customPriceInput by remember(currentGridPrice) { mutableStateOf(String.format("%.2f", currentGridPrice)) }
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -314,7 +320,7 @@ fun ProfileScreen(
                         .fillMaxWidth()
                         .padding(16.dp)
                 ) {
-                    val gridUsdVal = userState.gridBalance * 0.05
+                    val gridUsdVal = userState.gridBalance * currentGridPrice
                     val totalPort = userState.minerBalanceUsdt + gridUsdVal
 
                     Row(
@@ -334,7 +340,7 @@ fun ProfileScreen(
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
-                                text = "Pre-Launch: $0.05 / GRID",
+                                text = "Pre-Launch: $${String.format("%.2f", currentGridPrice)} / GRID",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = CyanAccent,
@@ -582,6 +588,87 @@ fun ProfileScreen(
             }
         }
 
+        // 👑 Super Admin Control Hub (revealed when isAdmin == true)
+        if (userState.isAdmin) {
+            item {
+                GlowingBorderCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenAdminControlHub() }
+                        .testTag("profile_admin_hub_card"),
+                    glowColor = GoldPrimary
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(CircleShape)
+                                    .background(GoldPrimary.copy(alpha = 0.2f))
+                                    .border(1.5.dp, GoldPrimary, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("👑", fontSize = 24.sp)
+                            }
+                            Column {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "👑 Admin Control Hub",
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = TextGold
+                                        )
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(EmeraldAccent)
+                                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                                    ) {
+                                        Text(
+                                            text = "SUPER ADMIN",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = ObsidianBg,
+                                                fontSize = 7.5.sp
+                                            )
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "Manage Pending Withdrawals, Users, Balances & System Settings",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = TextSecondary,
+                                        fontSize = 9.5.sp
+                                    )
+                                )
+                            }
+                        }
+
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Open Admin Hub",
+                            tint = GoldPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+        }
+
         // Admin & Simulation Controls
         item {
             GlassCard(
@@ -600,7 +687,140 @@ fun ProfileScreen(
                         Icon(Icons.Default.AdminPanelSettings, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
                         Text("ADMIN & SIMULATION CONTROLS", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = TextMuted))
                     }
-                    Spacer(modifier = Modifier.height(10.dp))
+                    // In-App Admin GRID Token Price Control
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(DarkNavySurface)
+                            .border(1.dp, CyanAccent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                            .padding(12.dp)
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(CyanAccent)
+                                    )
+                                    Text(
+                                        text = "GRID TOKEN PRICE HUB",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            color = CyanAccent,
+                                            letterSpacing = 0.5.sp
+                                        )
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(CyanAccent.copy(alpha = 0.15f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "ACTIVE: $${String.format("%.2f", currentGridPrice)}",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = CyanAccent,
+                                            fontSize = 9.sp
+                                        )
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Dynamically push price updates to Firestore ('system_settings/config'). All network nodes recalculate yields in real-time.",
+                                style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontSize = 9.5.sp)
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Preset quick-picks
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                listOf(0.01, 0.02, 0.05, 0.10, 0.25).forEach { presetPrice ->
+                                    val isCurrent = (currentGridPrice - presetPrice).let { it >= -0.001 && it <= 0.001 }
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (isCurrent) CyanAccent else CardSurfaceElevated)
+                                            .border(1.dp, if (isCurrent) CyanAccent else Color(0xFF334155), RoundedCornerShape(6.dp))
+                                            .clickable {
+                                                customPriceInput = String.format("%.2f", presetPrice)
+                                                onUpdateGridPrice(presetPrice)
+                                            }
+                                            .padding(vertical = 5.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "$${String.format("%.2f", presetPrice)}",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isCurrent) ObsidianBg else TextPrimary,
+                                                fontSize = 9.sp
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Custom price input and update button
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = customPriceInput,
+                                    onValueChange = { customPriceInput = it },
+                                    label = { Text("Price in USD", fontSize = 10.sp) },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    modifier = Modifier.weight(1f),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = CyanAccent,
+                                        unfocusedBorderColor = Color(0xFF334155),
+                                        focusedTextColor = TextPrimary,
+                                        unfocusedTextColor = TextPrimary
+                                    )
+                                )
+
+                                Button(
+                                    onClick = {
+                                        val parsed = customPriceInput.toDoubleOrNull()
+                                        if (parsed != null && parsed > 0.0) {
+                                            onUpdateGridPrice(parsed)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp)
+                                ) {
+                                    Icon(Icons.Default.Bolt, contentDescription = null, tint = ObsidianBg, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("SET PRICE", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     val pendingCount = userState.microTasks.count { it.status == PromoStatus.PENDING_REVIEW }
                     Button(

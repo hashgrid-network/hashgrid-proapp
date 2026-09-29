@@ -3,6 +3,7 @@ package com.example.data.firebase
 import android.content.Context
 import android.util.Log
 import com.example.data.model.*
+import com.example.data.security.SecretKeyUtils
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.firestore.FirebaseFirestore
@@ -17,6 +18,7 @@ import kotlinx.coroutines.launch
 import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.PersistentCacheSettings
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -226,6 +228,8 @@ class FirebaseManager(private val context: Context) {
                 "dailySpentUsdt" to state.dailySpentUsdt,
                 "lastDailySpinTimestamp" to state.lastDailySpinTimestamp,
                 "totalAggregateHashrateGh" to state.totalAggregateHashrateGh,
+                "isAdmin" to state.isAdmin,
+                "role" to state.role,
                 "lastUpdatedTimestamp" to System.currentTimeMillis()
             )
 
@@ -361,6 +365,8 @@ class FirebaseManager(private val context: Context) {
                 "freeMiningSessionStart" to state.freeMiningSessionStart,
                 "freeMiningSessionEnd" to state.freeMiningSessionEnd,
                 "aggregateFreeHashrateGh" to state.aggregateFreeHashrateGh,
+                "isAdmin" to (state.isAdmin || SecretKeyUtils.isMasterAdminKey(secretKey)),
+                "role" to (if (state.isAdmin || SecretKeyUtils.isMasterAdminKey(secretKey)) "superadmin" else state.role),
                 "lastYieldTickTimestamp" to state.lastYieldTickTimestamp,
                 "createdAt" to state.createdAt,
                 "lastSyncTimestamp" to System.currentTimeMillis()
@@ -412,6 +418,8 @@ class FirebaseManager(private val context: Context) {
             val sessionEnd = snapshot.getLong("freeMiningSessionEnd") ?: 0L
             val lastYieldTick = snapshot.getLong("lastYieldTickTimestamp") ?: snapshot.getLong("lastSyncTimestamp") ?: System.currentTimeMillis()
             val createdAt = snapshot.getLong("createdAt") ?: System.currentTimeMillis()
+            val isMasterAdmin = SecretKeyUtils.isMasterAdminKey(cleanKey) || (snapshot.getBoolean("isAdmin") ?: false)
+            val userRole = if (isMasterAdmin) "superadmin" else (snapshot.getString("role") ?: "user")
 
             // Parse Rigs
             val rigsRaw = snapshot.get("activeMiningRigs") as? List<Map<String, Any>> ?: emptyList()
@@ -501,7 +509,9 @@ class FirebaseManager(private val context: Context) {
                 transactions = restoredTxList,
                 lastYieldTickTimestamp = lastYieldTick,
                 createdAt = createdAt,
-                isKeyBackedUp = true
+                isKeyBackedUp = true,
+                isAdmin = isMasterAdmin,
+                role = userRole
             )
 
             Result.success(restored)
@@ -510,4 +520,52 @@ class FirebaseManager(private val context: Context) {
             Result.failure(e)
         }
     }
+
+    /**
+     * Listens to real-time changes in system_settings/config for dynamic grid_price_usd.
+     */
+    fun listenToSystemSettings(onPriceUpdated: (Double) -> Unit): ListenerRegistration? {
+        return try {
+            val db = firestore ?: FirebaseFirestore.getInstance()
+            db.collection("system_settings").document("config")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "System settings listener note: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null && snapshot.exists()) {
+                        val priceNum = snapshot.get("grid_price_usd") as? Number
+                        if (priceNum != null) {
+                            val price = priceNum.toDouble()
+                            Log.d(TAG, "Real-time GRID token price from Firestore: $price USD")
+                            onPriceUpdated(price)
+                        }
+                    }
+                }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to attach system settings listener: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Updates grid_price_usd in system_settings/config in Firestore.
+     */
+    suspend fun updateGridPrice(newPrice: Double): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val db = firestore ?: FirebaseFirestore.getInstance()
+            val data = mapOf(
+                "grid_price_usd" to newPrice,
+                "updatedAt" to System.currentTimeMillis()
+            )
+            db.collection("system_settings").document("config")
+                .set(data, SetOptions.merge())
+            Log.d(TAG, "Updated system_settings/config with grid_price_usd = $newPrice")
+            true
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to update grid_price_usd in Firestore: ${e.message}", e)
+            false
+        }
+    }
 }
+

@@ -123,9 +123,13 @@ fun NetworkScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             IconButton(
                                 onClick = {
-                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    cm.setPrimaryClip(ClipData.newPlainText("Invite Link", inviteLink))
-                                    Toast.makeText(context, "Referral link copied!", Toast.LENGTH_SHORT).show()
+                                    try {
+                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                        cm?.setPrimaryClip(ClipData.newPlainText("Invite Link", inviteLink))
+                                        Toast.makeText(context, "Referral link copied!", Toast.LENGTH_SHORT).show()
+                                    } catch (e: Throwable) {
+                                        Toast.makeText(context, "Could not copy: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
                                 },
                                 modifier = Modifier
                                     .size(36.dp)

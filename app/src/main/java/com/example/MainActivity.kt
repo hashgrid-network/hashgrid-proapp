@@ -145,6 +145,7 @@ fun MainApp(
         }
     }
     val cryptoPrices by viewModel.cryptoPrices.collectAsStateWithLifecycle()
+    val gridPriceUsd by viewModel.gridPriceUsd.collectAsStateWithLifecycle()
     val currentTab by viewModel.currentTab.collectAsStateWithLifecycle()
 
     val showDeposit by viewModel.showDepositDialog.collectAsStateWithLifecycle()
@@ -160,6 +161,7 @@ fun MainApp(
     val showSecretKeyBackup by viewModel.showSecretKeyBackupModal.collectAsStateWithLifecycle()
     val showSecretKeyRestore by viewModel.showSecretKeyRestoreModal.collectAsStateWithLifecycle()
     val showPinSetup by viewModel.showPinSetupModal.collectAsStateWithLifecycle()
+    val showAdminControlHub by viewModel.showAdminControlHubDialog.collectAsStateWithLifecycle()
     val isRestoringAccount by viewModel.isRestoringAccount.collectAsStateWithLifecycle()
 
     // NOWPayments State
@@ -196,7 +198,7 @@ fun MainApp(
             TopHeaderBar(
                 nodeId = userState.nodeId,
                 isColdStorageSynced = userState.isColdStorageSynced,
-                tickers = cryptoPrices,
+                preLaunchPriceUsd = gridPriceUsd,
                 modifier = Modifier.statusBarsPadding()
             )
         },
@@ -222,6 +224,7 @@ fun MainApp(
                 when (tab) {
                     AppNavTab.HOME -> HomeScreen(
                         userState = userState,
+                        gridPriceUsd = gridPriceUsd,
                         onNavigateToTab = { viewModel.selectTab(it) },
                         onOpenDeposit = { viewModel.showDepositDialog.value = true },
                         onOpenWithdraw = { viewModel.showWithdrawDialog.value = true },
@@ -239,6 +242,7 @@ fun MainApp(
                     )
                     AppNavTab.CLOUD_MINER -> CloudMinerScreen(
                         userState = userState,
+                        gridPriceUsd = gridPriceUsd,
                         onStartMining = { viewModel.startFreeMining() },
                         onOpenLuckyWheel = { viewModel.showLuckyWheelDialog.value = true },
                         onNavigateToNetwork = { viewModel.selectTab(AppNavTab.NETWORK) },
@@ -251,6 +255,8 @@ fun MainApp(
                     )
                     AppNavTab.PROFILE -> ProfileScreen(
                         userState = userState,
+                        currentGridPrice = gridPriceUsd,
+                        onUpdateGridPrice = { newPrice -> viewModel.updateGridPrice(newPrice) },
                         onOpenDeposit = { viewModel.showDepositDialog.value = true },
                         onOpenWithdraw = { viewModel.showWithdrawDialog.value = true },
                         onOpenLuckyWheel = { viewModel.showLuckyWheelDialog.value = true },
@@ -264,7 +270,8 @@ fun MainApp(
                         onOpenSecretKeyRestore = { viewModel.showSecretKeyRestoreModal.value = true },
                         onOpenPinSetup = { viewModel.showPinSetupModal.value = true },
                         onToggleBiometric = { viewModel.toggleBiometric(it) },
-                        onLockAppNow = { viewModel.lockApp() }
+                        onLockAppNow = { viewModel.lockApp() },
+                        onOpenAdminControlHub = { viewModel.showAdminControlHubDialog.value = true }
                     )
                 }
             }
@@ -303,6 +310,7 @@ fun MainApp(
     if (showCalculator) {
         ProfitCalculatorDialog(
             onDismiss = { viewModel.showCalculatorDialog.value = false },
+            gridPriceUsd = gridPriceUsd,
             onDeployNode = { viewModel.selectTab(AppNavTab.RIGS_STORE) }
         )
     }
@@ -334,6 +342,20 @@ fun MainApp(
     if (showTaskPolicy) {
         TaskPolicyDialog(
             onDismiss = { viewModel.showTaskPolicyDialog.value = false }
+        )
+    }
+
+    // 👑 Super Admin Control Hub Modal
+    if (showAdminControlHub) {
+        AdminControlHubDialog(
+            userState = userState,
+            currentGridPrice = gridPriceUsd,
+            onUpdateGridPrice = { viewModel.updateGridPrice(it) },
+            onApproveWithdrawal = { viewModel.adminApproveWithdrawal(it) },
+            onRejectWithdrawal = { viewModel.adminRejectWithdrawal(it) },
+            onAdjustBalance = { grid, usdt -> viewModel.adminAdjustUserBalance(grid, usdt) },
+            onCreateTestWithdrawal = { viewModel.adminCreateTestPendingWithdrawal() },
+            onDismiss = { viewModel.showAdminControlHubDialog.value = false }
         )
     }
 

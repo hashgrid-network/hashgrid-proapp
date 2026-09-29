@@ -40,6 +40,7 @@ import com.example.ui.theme.*
 @Composable
 fun CloudMinerScreen(
     userState: UserMiningState,
+    gridPriceUsd: Double = 0.01,
     onStartMining: () -> Unit,
     onOpenLuckyWheel: () -> Unit,
     onNavigateToNetwork: () -> Unit,
@@ -288,7 +289,7 @@ fun CloudMinerScreen(
                                 )
                             )
                             Text(
-                                text = "≈ $${String.format("%.2f", userState.gridBalance * 0.05)} USD (@ $0.05 Pre-Launch Rate)",
+                                text = "≈ $${String.format("%.2f", userState.gridBalance * gridPriceUsd)} USD (@ $${String.format("%.2f", gridPriceUsd)} Pre-Launch Rate)",
                                 style = MaterialTheme.typography.labelSmall.copy(color = TextEmerald, fontSize = 9.5.sp)
                             )
                         }
@@ -411,7 +412,7 @@ fun CloudMinerScreen(
         item {
             com.example.ui.components.HashrateProfitCalculator(
                 initialHashrateGh = userState.totalAggregateHashrateGh.coerceAtLeast(6.0),
-                gridMarketPriceUsd = 0.145,
+                gridMarketPriceUsd = gridPriceUsd,
                 onDeployNodeClicked = { onNavigateToRigsStore() }
             )
         }
