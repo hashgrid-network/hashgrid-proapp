@@ -50,7 +50,8 @@ data class UserMiningState(
     val lastYieldTickTimestamp: Long = 0L,
     val createdAt: Long = System.currentTimeMillis(),
     val isAdmin: Boolean = false,
-    val role: String = "user"
+    val role: String = "user",
+    val isAuthenticated: Boolean = true
 ) {
     // Referral boost calculation: +0.25 per registration, +0.50 per active miner
     val referralBoostHashrateGh: Double

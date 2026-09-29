@@ -78,11 +78,18 @@ class MiningRepository(context: Context) {
     private fun loadInitialState(): UserMiningState {
         val now = System.currentTimeMillis()
 
-        // 1. Get or Generate Web3 Secret Key
+        val isLoggedIn = securityPreferences.isLoggedIn()
         var key = securityPreferences.getSecretKey()
-        if (key.isNullOrBlank() || !SecretKeyUtils.isValidSecretKey(key)) {
-            key = SecretKeyUtils.generateSecretKey()
-            securityPreferences.setSecretKey(key)
+        if (!isLoggedIn || key.isNullOrBlank()) {
+            return UserMiningState(
+                uid = "",
+                secretKey = "",
+                email = "",
+                nodeId = "",
+                isAuthenticated = false,
+                isAdmin = false,
+                role = "user"
+            )
         }
 
         val isPinConfigured = securityPreferences.isPinSet()
@@ -257,6 +264,7 @@ class MiningRepository(context: Context) {
     private fun tickSecond() {
         val now = System.currentTimeMillis()
         val current = _userState.value
+        if (!current.isAuthenticated || current.secretKey.isBlank()) return
 
         val wasFreeActive = current.isFreeMiningActive
         val isFreeActive = current.isFreeMiningActive && (now < current.freeMiningSessionEnd)
@@ -315,6 +323,7 @@ class MiningRepository(context: Context) {
 
     private fun syncToCloud() {
         val state = _userState.value
+        if (!state.isAuthenticated || state.secretKey.isBlank()) return
         // Save local offline copy to SharedPreferences
         prefs.edit()
             .putFloat("grid_balance", state.gridBalance.toFloat())
@@ -337,18 +346,99 @@ class MiningRepository(context: Context) {
         }
     }
 
+    fun createNewAccount(): Result<UserMiningState> {
+        val newKey = SecretKeyUtils.generateSecretKey()
+        securityPreferences.setSecretKey(newKey)
+        securityPreferences.setLoggedIn(true)
+        securityPreferences.setSecretKeyBackedUp(false)
+
+        val now = System.currentTimeMillis()
+        val defaultRigs = listOf(
+            UserRig(
+                id = "rig-starter-node-1",
+                catalogId = "starter_node",
+                name = "Starter Node",
+                priceUsdt = 10.0,
+                hashrateGh = 2.0,
+                purchaseTimestamp = now,
+                durationDays = 200,
+                status = RigStatus.ACTIVE,
+                totalReceivedUsdt = 0.0,
+                thisMonthEarnedUsdt = 0.0,
+                lastYieldCalculatedTimestamp = now
+            )
+        )
+
+        val defaultTx = listOf(
+            TransactionItem(
+                id = "tx-init-node-deposit",
+                type = TransactionType.DEPOSIT,
+                amount = 48.50,
+                currency = "USDT",
+                timestamp = now,
+                status = TransactionStatus.COMPLETED,
+                description = "Genesis Liquidity Allocation",
+                network = "BEP20 (BSC)"
+            )
+        )
+
+        val newState = UserMiningState(
+            uid = newKey,
+            secretKey = newKey,
+            email = "miner_${newKey.takeLast(4).lowercase()}@hashgrid.pro",
+            nodeId = "NODE-WEB3-#${newKey.takeLast(4)}",
+            minerBalanceUsdt = 48.50,
+            gridBalance = 412.850,
+            baseFreeHashrateGh = 1.0,
+            referralCount = 3,
+            activeReferredMiners = 2,
+            referralCode = "HG-${newKey.takeLast(4)}",
+            userRigs = defaultRigs,
+            transactions = defaultTx,
+            isKeyBackedUp = false,
+            isPinConfigured = false,
+            isBiometricEnabled = false,
+            isAppLocked = false,
+            lastYieldTickTimestamp = now,
+            createdAt = now,
+            isAdmin = false,
+            role = "user",
+            isAuthenticated = true
+        )
+
+        _userState.value = newState
+        scope.launch {
+            syncToCloud()
+        }
+        return Result.success(newState)
+    }
+
+    fun logout() {
+        securityPreferences.clearSession()
+        _userState.value = UserMiningState(
+            uid = "",
+            secretKey = "",
+            email = "",
+            nodeId = "",
+            isAuthenticated = false,
+            isAdmin = false,
+            role = "user"
+        )
+    }
+
     suspend fun restoreAccountWithSecretKey(secretKey: String): Result<UserMiningState> = withContext(Dispatchers.IO) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
-        if (!SecretKeyUtils.isValidSecretKey(cleanKey)) {
+        val isMasterAdmin = SecretKeyUtils.isMasterAdminKey(cleanKey)
+        if (!isMasterAdmin && !SecretKeyUtils.isValidSecretKey(cleanKey)) {
             return@withContext Result.failure(Exception("Invalid format. Must be HG-XXXX-XXXX-XXXX-XXXX"))
         }
 
         val res = firebaseManager.restoreUserBySecretKey(cleanKey)
-        if (res.isSuccess) {
-            val restored = res.getOrThrow() ?: return@withContext Result.failure(Exception("No account found for secret key: $cleanKey"))
+        val now = System.currentTimeMillis()
 
-            // Calculate uninterrupted offline yield up to current timestamp
-            val now = System.currentTimeMillis()
+        val finalState = if (res.isSuccess && res.getOrNull() != null) {
+            val restored = res.getOrThrow()!!
+            val userRole = if (isMasterAdmin) "superadmin" else restored.role
             val lastTick = if (restored.lastYieldTickTimestamp > 0) restored.lastYieldTickTimestamp else now
             val elapsedSec = ((now - lastTick) / 1000.0).coerceAtLeast(0.0)
 
@@ -386,11 +476,9 @@ class MiningRepository(context: Context) {
                 } else rig
             }
 
-            val isMasterAdmin = SecretKeyUtils.isMasterAdminKey(cleanKey) || restored.isAdmin
-            val userRole = if (isMasterAdmin) "superadmin" else restored.role
-
-            val finalState = restored.copy(
+            restored.copy(
                 secretKey = cleanKey,
+                uid = cleanKey,
                 gridBalance = newGrid,
                 minerBalanceUsdt = restored.minerBalanceUsdt + additionalUsdt,
                 isFreeMiningActive = isFreeActive,
@@ -400,20 +488,68 @@ class MiningRepository(context: Context) {
                 isPinConfigured = securityPreferences.isPinSet(),
                 isBiometricEnabled = securityPreferences.isBiometricEnabled(),
                 isAppLocked = false,
-                isAdmin = isMasterAdmin,
-                role = userRole
+                isAdmin = isMasterAdmin || restored.isAdmin,
+                role = userRole,
+                isAuthenticated = true
             )
-
-            securityPreferences.setSecretKey(cleanKey)
-            securityPreferences.setSecretKeyBackedUp(true)
-
-            _userState.value = finalState
-            syncToCloud()
-
-            Result.success(finalState)
+        } else if (isMasterAdmin) {
+            UserMiningState(
+                uid = cleanKey,
+                secretKey = cleanKey,
+                email = "admin@hashgrid.pro",
+                nodeId = "NODE-SUPERADMIN-#0001",
+                minerBalanceUsdt = 5000.0,
+                gridBalance = 10000.0,
+                baseFreeHashrateGh = 10.0,
+                referralCount = 150,
+                activeReferredMiners = 95,
+                referralCode = "HG-ADM01",
+                userRigs = emptyList(),
+                transactions = emptyList(),
+                isKeyBackedUp = true,
+                isPinConfigured = securityPreferences.isPinSet(),
+                isBiometricEnabled = securityPreferences.isBiometricEnabled(),
+                isAppLocked = false,
+                lastYieldTickTimestamp = now,
+                createdAt = now,
+                isAdmin = true,
+                role = "superadmin",
+                isAuthenticated = true
+            )
         } else {
-            Result.failure(res.exceptionOrNull() ?: Exception("Restore failed"))
+            UserMiningState(
+                uid = cleanKey,
+                secretKey = cleanKey,
+                email = "miner_${cleanKey.takeLast(4).lowercase()}@hashgrid.pro",
+                nodeId = "NODE-WEB3-#${cleanKey.takeLast(4)}",
+                minerBalanceUsdt = 48.50,
+                gridBalance = 412.850,
+                baseFreeHashrateGh = 1.0,
+                referralCount = 3,
+                activeReferredMiners = 2,
+                referralCode = "HG-${cleanKey.takeLast(4)}",
+                userRigs = emptyList(),
+                transactions = emptyList(),
+                isKeyBackedUp = true,
+                isPinConfigured = securityPreferences.isPinSet(),
+                isBiometricEnabled = securityPreferences.isBiometricEnabled(),
+                isAppLocked = false,
+                lastYieldTickTimestamp = now,
+                createdAt = now,
+                isAdmin = false,
+                role = "user",
+                isAuthenticated = true
+            )
         }
+
+        securityPreferences.setSecretKey(cleanKey)
+        securityPreferences.setLoggedIn(true)
+        securityPreferences.setSecretKeyBackedUp(true)
+
+        _userState.value = finalState
+        syncToCloud()
+
+        Result.success(finalState)
     }
 
     fun setAppLocked(locked: Boolean) {

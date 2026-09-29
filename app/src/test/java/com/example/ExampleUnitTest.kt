@@ -151,4 +151,35 @@ class ExampleUnitTest {
         val monthlyGridValueUsd = monthlyGridCoins * gridPriceUsd
         assertEquals(60.0, monthlyGridValueUsd, 0.001)
     }
+
+    @Test
+    fun testLogoutAndUnauthenticatedState() {
+        val loggedOutState = UserMiningState(
+            uid = "",
+            secretKey = "",
+            email = "",
+            nodeId = "",
+            isAuthenticated = false,
+            isAdmin = false,
+            role = "user"
+        )
+        assertFalse(loggedOutState.isAuthenticated)
+        assertTrue(loggedOutState.secretKey.isBlank())
+        assertFalse(loggedOutState.isAdmin)
+    }
+
+    @Test
+    fun testAuthenticatedStateCreation() {
+        val newKey = com.example.data.security.SecretKeyUtils.generateSecretKey()
+        val authState = UserMiningState(
+            uid = newKey,
+            secretKey = newKey,
+            isAuthenticated = true,
+            isAdmin = false,
+            role = "user"
+        )
+        assertTrue(authState.isAuthenticated)
+        assertTrue(authState.secretKey.isNotBlank())
+        assertTrue(com.example.data.security.SecretKeyUtils.isValidSecretKey(authState.secretKey))
+    }
 }

@@ -2,6 +2,7 @@ package com.example
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
@@ -184,6 +185,19 @@ fun MainApp(
         }
     }
 
+    if (!userState.isAuthenticated || userState.secretKey.isBlank()) {
+        WelcomeAuthScreen(
+            isLoading = isRestoringAccount,
+            onCreateAccount = { viewModel.createNewAccount() },
+            onRestoreAccount = { key -> viewModel.restoreAccountWithSecretKey(key) }
+        )
+        return
+    }
+
+    BackHandler(enabled = currentTab != AppNavTab.HOME) {
+        viewModel.selectTab(AppNavTab.HOME)
+    }
+
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
@@ -271,7 +285,8 @@ fun MainApp(
                         onOpenPinSetup = { viewModel.showPinSetupModal.value = true },
                         onToggleBiometric = { viewModel.toggleBiometric(it) },
                         onLockAppNow = { viewModel.lockApp() },
-                        onOpenAdminControlHub = { viewModel.showAdminControlHubDialog.value = true }
+                        onOpenAdminControlHub = { viewModel.showAdminControlHubDialog.value = true },
+                        onLogout = { viewModel.logout() }
                     )
                 }
             }

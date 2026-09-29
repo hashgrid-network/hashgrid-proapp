@@ -310,6 +310,23 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
         emitToast("Secret Key backup confirmed! Keep your key safe.")
     }
 
+    fun createNewAccount() {
+        val result = repository.createNewAccount()
+        if (result.isSuccess) {
+            _currentTab.value = AppNavTab.HOME
+            showSecretKeyBackupModal.value = true
+            emitToast("✨ New Account Created! Please securely backup your Secret Key.")
+        } else {
+            emitToast("Failed to create account.")
+        }
+    }
+
+    fun logout() {
+        repository.logout()
+        _currentTab.value = AppNavTab.HOME
+        emitToast("Logged out of HashGrid Pro.")
+    }
+
     fun restoreAccountWithSecretKey(secretKey: String) {
         viewModelScope.launch {
             isRestoringAccount.value = true
@@ -317,6 +334,7 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
             isRestoringAccount.value = false
             if (result.isSuccess) {
                 showSecretKeyRestoreModal.value = false
+                _currentTab.value = AppNavTab.HOME
                 repository.setAppLocked(false)
                 emitToast("Account Restored Successfully! All balances and active rigs synced from Firestore.")
                 if (!repository.isPinSet()) {

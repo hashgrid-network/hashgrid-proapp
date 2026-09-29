@@ -51,9 +51,11 @@ fun ProfileScreen(
     onToggleBiometric: (Boolean) -> Unit = {},
     onLockAppNow: () -> Unit = {},
     onOpenAdminControlHub: () -> Unit = {},
+    onLogout: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var customPriceInput by remember(currentGridPrice) { mutableStateOf(String.format("%.2f", currentGridPrice)) }
+    var showLogoutConfirmDialog by remember { mutableStateOf(false) }
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -838,6 +840,94 @@ fun ProfileScreen(
                 }
             }
         }
+
+        // 🚪 Log Out / Switch Account Action Button
+        item {
+            Spacer(modifier = Modifier.height(10.dp))
+            Button(
+                onClick = { showLogoutConfirmDialog = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+                    .testTag("btn_profile_logout"),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = CrimsonError.copy(alpha = 0.12f)
+                ),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CrimsonError.copy(alpha = 0.6f)),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    Icons.Default.ExitToApp,
+                    contentDescription = "Log Out",
+                    tint = CrimsonError,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "🚪 Log Out / Switch Account",
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = CrimsonError
+                    )
+                )
+            }
+            Spacer(modifier = Modifier.height(30.dp))
+        }
+    }
+
+    if (showLogoutConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutConfirmDialog = false },
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = CrimsonError, modifier = Modifier.size(24.dp))
+                    Text(
+                        text = "Log Out of HashGrid Pro?",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            color = TextPrimary
+                        )
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = "Please ensure your 16-character Secret Key is backed up. Any unbacked account balance cannot be recovered.",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = TextSecondary,
+                        lineHeight = 20.sp
+                    )
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showLogoutConfirmDialog = false
+                        onLogout()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CrimsonError),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.testTag("confirm_logout_btn")
+                ) {
+                    Text("Log Out", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = Color.White))
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { showLogoutConfirmDialog = false },
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
+                ) {
+                    Text("Cancel", style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary))
+                }
+            },
+            containerColor = ObsidianBg,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.border(1.dp, CrimsonError.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+        )
     }
 }
 

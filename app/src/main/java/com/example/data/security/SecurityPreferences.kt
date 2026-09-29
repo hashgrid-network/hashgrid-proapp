@@ -19,6 +19,7 @@ class SecurityPreferences(context: Context) {
         private const val KEY_PIN_SALT = "sec_pin_salt"
         private const val KEY_BIOMETRIC_ENABLED = "sec_biometric_enabled"
         private const val KEY_FIRST_LAUNCH_DONE = "sec_first_launch_done"
+        private const val KEY_IS_LOGGED_IN = "sec_is_logged_in"
 
         private fun createEncryptedOrFallbackPrefs(context: Context): SharedPreferences {
             return try {
@@ -162,6 +163,38 @@ class SecurityPreferences(context: Context) {
             prefs.edit().clear().apply()
         } catch (e: Throwable) {
             Log.e(TAG, "Error clearing all security prefs: ${e.message}")
+        }
+    }
+
+    fun isLoggedIn(): Boolean {
+        return try {
+            val key = getSecretKey()
+            !key.isNullOrBlank() && prefs.getBoolean(KEY_IS_LOGGED_IN, true)
+        } catch (e: Throwable) {
+            false
+        }
+    }
+
+    fun setLoggedIn(loggedIn: Boolean) {
+        try {
+            prefs.edit().putBoolean(KEY_IS_LOGGED_IN, loggedIn).apply()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error setting logged in state: ${e.message}")
+        }
+    }
+
+    fun clearSession() {
+        try {
+            prefs.edit()
+                .remove(KEY_SECRET_KEY)
+                .remove(KEY_IS_BACKED_UP)
+                .remove(KEY_PIN_HASH)
+                .remove(KEY_PIN_SALT)
+                .remove(KEY_BIOMETRIC_ENABLED)
+                .putBoolean(KEY_IS_LOGGED_IN, false)
+                .apply()
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error clearing session: ${e.message}")
         }
     }
 
