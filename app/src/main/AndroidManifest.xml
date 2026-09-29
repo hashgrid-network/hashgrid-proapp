@@ -27,6 +27,10 @@
             </intent-filter>
         </activity>
 
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
+
         <service
             android:name=".data.firebase.HashGridMessagingService"
             android:exported="false">
