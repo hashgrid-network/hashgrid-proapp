@@ -71,6 +71,7 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     val showPinSetupModal = MutableStateFlow(false)
     val showAdminControlHubDialog = MutableStateFlow(false)
     val isRestoringAccount = MutableStateFlow(false)
+    val accountLimitAlertMessage = MutableStateFlow<String?>(null)
 
     // NOWPayments Gateway State
     val activePaymentSession = MutableStateFlow<NowPaymentResponse?>(null)
@@ -324,7 +325,11 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
                 showSecretKeyBackupModal.value = true
                 emitToast("✨ New Account Created! Please securely backup your Secret Key.")
             } else {
-                emitToast("Failed to create account.")
+                val errorMsg = result.exceptionOrNull()?.message ?: "Failed to create account."
+                if (errorMsg.contains("Account Limit Reached", ignoreCase = true)) {
+                    accountLimitAlertMessage.value = errorMsg
+                }
+                emitToast(errorMsg)
             }
         }
     }

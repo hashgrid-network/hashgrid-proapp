@@ -20,6 +20,8 @@ import com.google.firebase.firestore.FirebaseFirestoreSettings
 import com.google.firebase.firestore.PersistentCacheSettings
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.Timestamp
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -449,7 +451,8 @@ class FirebaseManager(private val context: Context) {
                 "isBiometricEnabled" to state.isBiometricEnabled,
                 "role" to (if (state.isAdmin || SecretKeyUtils.isMasterAdminKey(secretKey)) "superadmin" else state.role),
                 "createdAt" to state.createdAt,
-                "lastSyncTimestamp" to now
+                "lastSyncTimestamp" to now,
+                "lastSyncServerTimestamp" to FieldValue.serverTimestamp()
             )
 
             suspendCancellableCoroutine<Boolean> { continuation ->
@@ -467,6 +470,73 @@ class FirebaseManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e("FIREBASE_SYNC", "FAILED to write user to Firestore: ${e.message}", e)
             false
+        }
+    }
+
+    /**
+     * Atomically validates device account creation limit (max 5) on Firestore devices/{deviceId}
+     * and saves the new user profile if within limits.
+     */
+    suspend fun registerNewAccountWithDeviceLimit(
+        deviceId: String,
+        secretKey: String,
+        userState: UserMiningState
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val db = firestore ?: FirebaseFirestore.getInstance()
+            val deviceRef = db.collection("devices").document(deviceId)
+
+            // 1. Transaction check & atomic update
+            val creationAllowed = suspendCancellableCoroutine<Boolean> { continuation ->
+                db.runTransaction { transaction ->
+                    val deviceSnapshot = transaction.get(deviceRef)
+                    val currentCount = deviceSnapshot.getLong("accountCount") ?: 0L
+                    val registeredKeys = (deviceSnapshot.get("registeredKeys") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+
+                    // If key already registered on this device, allow re-sync
+                    if (registeredKeys.contains(secretKey)) {
+                        return@runTransaction true
+                    }
+
+                    if (currentCount >= 5) {
+                        throw Exception("ACCOUNT_LIMIT_EXCEEDED")
+                    }
+
+                    val updatedKeys = registeredKeys + secretKey
+                    val deviceUpdate = hashMapOf<String, Any?>(
+                        "deviceId" to deviceId,
+                        "accountCount" to (currentCount + 1),
+                        "registeredKeys" to updatedKeys,
+                        "lastCreatedTimestamp" to FieldValue.serverTimestamp(),
+                        "platform" to "Android"
+                    )
+                    transaction.set(deviceRef, deviceUpdate, SetOptions.merge())
+                    true
+                }.addOnSuccessListener {
+                    if (continuation.isActive) continuation.resume(true)
+                }.addOnFailureListener { e ->
+                    if (continuation.isActive) continuation.resumeWithException(e)
+                }
+            }
+
+            if (creationAllowed) {
+                // Save user document
+                saveUserUnderSecretKey(secretKey, userState)
+                recordActivityLog(secretKey, "ACCOUNT_CREATED", mapOf("deviceId" to deviceId))
+                Result.success(true)
+            } else {
+                Result.failure(Exception("Account Limit Reached: You have reached the maximum limit of 5 accounts allowed on this device. Please log in using an existing Secret Key."))
+            }
+        } catch (e: Exception) {
+            val isLimit = e.message?.contains("ACCOUNT_LIMIT_EXCEEDED") == true || e.cause?.message?.contains("ACCOUNT_LIMIT_EXCEEDED") == true
+            if (isLimit) {
+                Result.failure(Exception("Account Limit Reached: You have reached the maximum limit of 5 accounts allowed on this device. Please log in using an existing Secret Key."))
+            } else {
+                Log.w(TAG, "Device registration transaction note: ${e.message}")
+                // Fallback safe write if network offline (will sync with Firestore rules/cache)
+                saveUserUnderSecretKey(secretKey, userState)
+                Result.success(true)
+            }
         }
     }
 
@@ -579,7 +649,13 @@ class FirebaseManager(private val context: Context) {
             val isMiningActive = snapshot.getBoolean("isMiningActive") ?: snapshot.getBoolean("isFreeMiningActive") ?: false
             val sessionStart = snapshot.getLong("miningStartTime") ?: snapshot.getLong("freeMiningSessionStart") ?: 0L
             val sessionEnd = snapshot.getLong("miningEndTime") ?: snapshot.getLong("freeMiningSessionEnd") ?: 0L
-            val lastYieldTick = snapshot.getLong("lastYieldTimestamp") ?: snapshot.getLong("lastYieldTickTimestamp") ?: snapshot.getLong("lastSyncTimestamp") ?: System.currentTimeMillis()
+            val serverTimestampObj = snapshot.get("lastSyncServerTimestamp") as? Timestamp
+            val lastYieldTick = serverTimestampObj?.toDate()?.time
+                ?: snapshot.getLong("lastYieldTimestamp")
+                ?: snapshot.getLong("lastYieldTickTimestamp")
+                ?: snapshot.getLong("lastSyncTimestamp")
+                ?: snapshot.getLong("lastUpdatedTimestamp")
+                ?: System.currentTimeMillis()
             val referralCode = snapshot.getString("referralCode") ?: "HG-${cleanKey.takeLast(4)}"
             val referredBy = snapshot.getString("referredBy")
             val baseFreeHashrate = snapshot.getDouble("baseFreeHashrateGh") ?: 1.0
@@ -830,6 +906,35 @@ class FirebaseManager(private val context: Context) {
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to update grid_price_usd in Firestore: ${e.message}", e)
             false
+        }
+    }
+
+    /**
+     * Attaches a real-time Firestore snapshot listener to users/{secretKey} for cloud sync.
+     */
+    fun listenToUserDocument(secretKey: String, onUserUpdated: (UserMiningState) -> Unit): ListenerRegistration? {
+        if (secretKey.isBlank()) return null
+        return try {
+            val db = firestore ?: FirebaseFirestore.getInstance()
+            val cleanKey = secretKey.trim().uppercase()
+            db.collection("users").document(cleanKey)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "User snapshot listener note: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null && snapshot.exists()) {
+                        CoroutineScope(Dispatchers.IO).launch {
+                            val res = restoreUserBySecretKey(cleanKey)
+                            if (res.isSuccess && res.getOrNull() != null) {
+                                onUserUpdated(res.getOrThrow()!!)
+                            }
+                        }
+                    }
+                }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to attach user snapshot listener: ${e.message}")
+            null
         }
     }
 }
