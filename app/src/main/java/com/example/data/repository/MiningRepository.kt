@@ -339,12 +339,8 @@ class MiningRepository(context: Context) {
         }
     }
 
-    fun createNewAccount(): Result<UserMiningState> {
+    suspend fun createNewAccount(): Result<UserMiningState> = withContext(Dispatchers.IO) {
         val newKey = SecretKeyUtils.generateSecretKey()
-        securityPreferences.setSecretKey(newKey)
-        securityPreferences.setLoggedIn(true)
-        securityPreferences.setSecretKeyBackedUp(false)
-
         val now = System.currentTimeMillis()
 
         val newState = UserMiningState(
@@ -357,7 +353,7 @@ class MiningRepository(context: Context) {
             baseFreeHashrateGh = 2.0,
             referralCount = 0,
             activeReferredMiners = 0,
-            referralCode = "HG-${newKey.takeLast(4)}",
+            referralCode = newKey,
             userRigs = emptyList(),
             transactions = emptyList(),
             isKeyBackedUp = false,
@@ -371,12 +367,16 @@ class MiningRepository(context: Context) {
             isAuthenticated = true
         )
 
+        // Force immediate direct Firestore write
+        firebaseManager.saveUserUnderSecretKey(newKey, newState)
+
+        securityPreferences.setSecretKey(newKey)
+        securityPreferences.setLoggedIn(true)
+        securityPreferences.setSecretKeyBackedUp(false)
+
         _userState.value = newState
-        scope.launch {
-            firebaseManager.saveUserUnderSecretKey(newKey, newState)
-            syncToCloud()
-        }
-        return Result.success(newState)
+        syncToCloud()
+        Result.success(newState)
     }
 
     fun logout() {
@@ -803,6 +803,15 @@ class MiningRepository(context: Context) {
     // OTHER PROTOCOL METHODS
     // ==========================================
 
+    fun setUserOnline(isOnline: Boolean) {
+        val state = _userState.value
+        if (state.isAuthenticated && state.secretKey.isNotBlank()) {
+            scope.launch {
+                firebaseManager.updateOnlineStatus(state.secretKey, isOnline)
+            }
+        }
+    }
+
     fun startFreeMiningSession() {
         val now = System.currentTimeMillis()
         val duration = 24L * 60 * 60 * 1000
@@ -812,6 +821,17 @@ class MiningRepository(context: Context) {
             freeMiningSessionStart = now,
             freeMiningSessionEnd = now + duration
         )
+        scope.launch {
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "MINING_SESSION_STARTED",
+                details = mapOf(
+                    "hashrateGh" to current.aggregateFreeHashrateGh,
+                    "startTime" to now,
+                    "endTime" to (now + duration)
+                )
+            )
+        }
         syncToCloud()
     }
 
@@ -867,6 +887,19 @@ class MiningRepository(context: Context) {
                 firebaseManager.saveUserUnderSecretKey(current.secretKey, updatedState)
             }
             firebaseManager.recordPlanActivation(current.uid, newRig, newBalance)
+            firebaseManager.saveOrUpdateTransaction(current.uid, tx)
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "NODE_PURCHASED",
+                details = mapOf(
+                    "rigId" to newRig.id,
+                    "catalogId" to catalogItem.id,
+                    "name" to catalogItem.name,
+                    "priceUsdt" to catalogItem.priceUsdt,
+                    "hashrateGh" to catalogItem.hashrateGh,
+                    "remainingBalanceUsdt" to newBalance
+                )
+            )
             syncToCloud()
         }
         return Result.success(newRig)
@@ -892,6 +925,14 @@ class MiningRepository(context: Context) {
             minerBalanceUsdt = current.minerBalanceUsdt + amountUsdt,
             transactions = listOf(tx) + current.transactions
         )
+        scope.launch {
+            firebaseManager.saveOrUpdateTransaction(current.uid, tx)
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "DEPOSIT_CONFIRMED",
+                details = mapOf("amount" to amountUsdt, "network" to network, "txHash" to txHash)
+            )
+        }
         syncToCloud()
     }
 
@@ -924,6 +965,14 @@ class MiningRepository(context: Context) {
             minerBalanceUsdt = current.minerBalanceUsdt - amountUsdt,
             transactions = listOf(tx) + current.transactions
         )
+        scope.launch {
+            firebaseManager.saveOrUpdateTransaction(current.uid, tx)
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "WITHDRAWAL_REQUESTED",
+                details = mapOf("amount" to amountUsdt, "address" to address, "network" to network)
+            )
+        }
         syncToCloud()
         return Result.success(tx)
     }
@@ -979,6 +1028,18 @@ class MiningRepository(context: Context) {
             transactions = listOf(tx) + current.transactions
         )
 
+        scope.launch {
+            firebaseManager.saveOrUpdateTransaction(current.uid, tx)
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "LUCKY_WHEEL_SPIN",
+                details = mapOf(
+                    "rewardTitle" to sector.title,
+                    "rewardType" to sector.type.name,
+                    "value" to sector.value
+                )
+            )
+        }
         syncToCloud()
         return record
     }
@@ -1002,6 +1063,13 @@ class MiningRepository(context: Context) {
         _userState.value = current.copy(
             microTasks = listOf(sub) + current.microTasks
         )
+        scope.launch {
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "MICRO_TASK_SUBMITTED",
+                details = mapOf("taskId" to sub.id, "platform" to platform.name, "initialViews" to initialViews, "finalViews" to finalViews)
+            )
+        }
         syncToCloud()
     }
 
@@ -1022,6 +1090,13 @@ class MiningRepository(context: Context) {
         _userState.value = current.copy(
             videoPromotions = listOf(sub) + current.videoPromotions
         )
+        scope.launch {
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "VIDEO_PROMO_SUBMITTED",
+                details = mapOf("promoId" to sub.id, "platform" to platform.name, "url" to url, "channel" to channel)
+            )
+        }
         syncToCloud()
     }
 
@@ -1045,6 +1120,14 @@ class MiningRepository(context: Context) {
             minerBalanceUsdt = current.minerBalanceUsdt + commission,
             transactions = listOf(tx) + current.transactions
         )
+        scope.launch {
+            firebaseManager.saveOrUpdateTransaction(current.uid, tx)
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "REFERRAL_COMMISSION_RECEIVED",
+                details = mapOf("commissionUsdt" to commission, "source" to "100_USDT_RIG")
+            )
+        }
         syncToCloud()
     }
 
@@ -1056,6 +1139,14 @@ class MiningRepository(context: Context) {
             referralCount = newRef,
             activeReferredMiners = newActive
         )
+        scope.launch {
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "NEW_REFERRAL_JOINED",
+                details = mapOf("totalReferrals" to newRef, "activeMiners" to newActive)
+            )
+        }
+        syncToCloud()
     }
 
     fun approvePendingTasksSimulation() {
@@ -1087,6 +1178,13 @@ class MiningRepository(context: Context) {
             microTasks = updatedTasks,
             transactions = updatedTx
         )
+        scope.launch {
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "TASKS_APPROVED_REWARD",
+                details = mapOf("totalRewardedUsdt" to rewardSum)
+            )
+        }
         syncToCloud()
     }
 
@@ -1105,6 +1203,17 @@ class MiningRepository(context: Context) {
             } else tx
         }
         _userState.value = current.copy(transactions = updatedTx)
+        val approvedTx = updatedTx.find { it.id == txId }
+        scope.launch {
+            if (approvedTx != null) {
+                firebaseManager.saveOrUpdateTransaction(current.uid, approvedTx)
+                firebaseManager.recordActivityLog(
+                    userId = current.uid,
+                    action = "ADMIN_WITHDRAWAL_APPROVED",
+                    details = mapOf("txId" to txId, "amount" to approvedTx.amount)
+                )
+            }
+        }
         syncToCloud()
     }
 
@@ -1124,6 +1233,17 @@ class MiningRepository(context: Context) {
             minerBalanceUsdt = current.minerBalanceUsdt + refundAmount,
             transactions = updatedTx
         )
+        val rejectedTx = updatedTx.find { it.id == txId }
+        scope.launch {
+            if (rejectedTx != null) {
+                firebaseManager.saveOrUpdateTransaction(current.uid, rejectedTx)
+                firebaseManager.recordActivityLog(
+                    userId = current.uid,
+                    action = "ADMIN_WITHDRAWAL_REJECTED",
+                    details = mapOf("txId" to txId, "refundedAmount" to refundAmount)
+                )
+            }
+        }
         syncToCloud()
     }
 
@@ -1133,6 +1253,13 @@ class MiningRepository(context: Context) {
             gridBalance = newGrid.coerceAtLeast(0.0),
             minerBalanceUsdt = newUsdt.coerceAtLeast(0.0)
         )
+        scope.launch {
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "ADMIN_BALANCE_ADJUSTMENT",
+                details = mapOf("newGrid" to newGrid, "newUsdt" to newUsdt)
+            )
+        }
         syncToCloud()
     }
 
@@ -1152,6 +1279,14 @@ class MiningRepository(context: Context) {
         _userState.value = current.copy(
             transactions = listOf(tx) + current.transactions
         )
+        scope.launch {
+            firebaseManager.saveOrUpdateTransaction(current.uid, tx)
+            firebaseManager.recordActivityLog(
+                userId = current.uid,
+                action = "ADMIN_TEST_WITHDRAWAL_CREATED",
+                details = mapOf("amount" to amount, "address" to address, "network" to network)
+            )
+        }
         syncToCloud()
     }
 }

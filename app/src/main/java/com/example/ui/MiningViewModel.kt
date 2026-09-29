@@ -301,6 +301,10 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
         emitToast(if (enabled) "Biometric Fingerprint Unlock Enabled" else "Biometric Fingerprint Disabled")
     }
 
+    fun setUserOnline(isOnline: Boolean) {
+        repository.setUserOnline(isOnline)
+    }
+
     fun markSecretKeyBackedUp() {
         repository.markSecretKeyBackedUp()
         showSecretKeyBackupModal.value = false
@@ -311,13 +315,17 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun createNewAccount() {
-        val result = repository.createNewAccount()
-        if (result.isSuccess) {
-            _currentTab.value = AppNavTab.HOME
-            showSecretKeyBackupModal.value = true
-            emitToast("✨ New Account Created! Please securely backup your Secret Key.")
-        } else {
-            emitToast("Failed to create account.")
+        viewModelScope.launch {
+            isRestoringAccount.value = true
+            val result = repository.createNewAccount()
+            isRestoringAccount.value = false
+            if (result.isSuccess) {
+                _currentTab.value = AppNavTab.HOME
+                showSecretKeyBackupModal.value = true
+                emitToast("✨ New Account Created! Please securely backup your Secret Key.")
+            } else {
+                emitToast("Failed to create account.")
+            }
         }
     }
 

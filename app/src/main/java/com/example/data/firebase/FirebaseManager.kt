@@ -10,6 +10,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
@@ -26,7 +27,7 @@ import kotlin.coroutines.resumeWithException
 class FirebaseManager(private val context: Context) {
 
     companion object {
-        const val TAG = "HashGridFirebase"
+        const val TAG = "FIREBASE_SYNC"
         const val API_KEY = "AIzaSyCMDAfHJ6awiJYRDoJ1PR-UMC7yF8_kauc"
         const val AUTH_DOMAIN = "hashgrid-c7fe4.firebaseapp.com"
         const val PROJECT_ID = "hashgrid-c7fe4"
@@ -81,27 +82,11 @@ class FirebaseManager(private val context: Context) {
                 Log.w(TAG, "Could not initialize Firestore on this environment: ${e.message}")
             }
 
-            // Safely attempt FCM token retrieval with fallback to avoid hard failure exceptions
+            // FCM Messaging initialization without creating dummy accounts
             try {
                 FirebaseMessaging.getInstance().isAutoInitEnabled = false
-                FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                    try {
-                        if (task.isSuccessful && task.result != null) {
-                            val token = task.result
-                            Log.d(TAG, "FCM Registration Token: $token")
-                            saveFcmTokenToFirestore("HG-USER-8921", token)
-                        } else {
-                            Log.w(TAG, "FCM token not available. Using local device token identifier.")
-                            saveFcmTokenToFirestore("HG-USER-8921", "fcm_token_device_${System.currentTimeMillis().toString().takeLast(6)}")
-                        }
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "Handled FCM token callback: ${e.message}")
-                        saveFcmTokenToFirestore("HG-USER-8921", "fcm_token_device_hg8921")
-                    }
-                }
             } catch (e: Throwable) {
-                Log.w(TAG, "FCM not supported on this device/environment: ${e.message}")
-                saveFcmTokenToFirestore("HG-USER-8921", "fcm_token_device_hg8921")
+                Log.w(TAG, "FCM messaging note: ${e.message}")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Firebase initialization error: ${e.message}", e)
@@ -361,58 +346,187 @@ class FirebaseManager(private val context: Context) {
                 )
             }
 
-            val docData = hashMapOf(
+            val allTransactionsList = state.transactions.map { tx ->
+                mapOf(
+                    "id" to tx.id,
+                    "type" to tx.type.name,
+                    "amount" to tx.amount,
+                    "currency" to tx.currency,
+                    "timestamp" to tx.timestamp,
+                    "status" to tx.status.name,
+                    "description" to tx.description,
+                    "address" to (tx.address ?: ""),
+                    "network" to (tx.network ?: ""),
+                    "txHash" to (tx.txHash ?: ""),
+                    "paymentId" to (tx.paymentId ?: "")
+                )
+            }
+
+            val spinHistoryList = state.spinHistory.map { spin ->
+                mapOf(
+                    "id" to spin.id,
+                    "rewardTitle" to spin.rewardTitle,
+                    "rewardSubtitle" to spin.rewardSubtitle,
+                    "timestamp" to spin.timestamp,
+                    "rewardType" to spin.rewardType.name,
+                    "value" to spin.value
+                )
+            }
+
+            val microTasksList = state.microTasks.map { task ->
+                mapOf(
+                    "id" to task.id,
+                    "platform" to task.platform.name,
+                    "submittedAt" to task.submittedAt,
+                    "initialViewCount" to task.initialViewCount,
+                    "finalViewCount" to task.finalViewCount,
+                    "status" to task.status.name,
+                    "rewardUsdt" to task.rewardUsdt,
+                    "notes" to task.notes
+                )
+            }
+
+            val videoPromotionsList = state.videoPromotions.map { promo ->
+                mapOf(
+                    "id" to promo.id,
+                    "platform" to promo.platform.name,
+                    "videoUrl" to promo.videoUrl,
+                    "channelOrHandle" to promo.channelOrHandle,
+                    "submittedAt" to promo.submittedAt,
+                    "estimatedViews" to promo.estimatedViews,
+                    "status" to promo.status.name,
+                    "rewardUsdt" to promo.rewardUsdt,
+                    "reviewerFeedback" to (promo.reviewerFeedback ?: "")
+                )
+            }
+
+            val now = System.currentTimeMillis()
+            val docData = hashMapOf<String, Any?>(
+                "uid" to secretKey,
                 "secretKey" to secretKey,
+                "nodeId" to "NODE-WEB3-#${secretKey.takeLast(4)}",
                 "isAdmin" to (state.isAdmin || SecretKeyUtils.isMasterAdminKey(secretKey)),
-                "gridBalance" to state.gridBalance,
+                "minerBalanceUsdt" to state.minerBalanceUsdt,
                 "usdtBalance" to state.minerBalanceUsdt,
+                "gridBalance" to state.gridBalance,
+                "totalAggregateHashrateGh" to state.totalAggregateHashrateGh,
                 "totalHashrate" to state.totalAggregateHashrateGh,
+                "baseFreeHashrateGh" to state.baseFreeHashrateGh,
+                "isFreeMiningActive" to state.isFreeMiningActive,
                 "isMiningActive" to state.isFreeMiningActive,
+                "freeMiningSessionStart" to state.freeMiningSessionStart,
+                "freeMiningSessionEnd" to state.freeMiningSessionEnd,
                 "miningStartTime" to state.freeMiningSessionStart,
                 "miningEndTime" to state.freeMiningSessionEnd,
+                "lastUpdatedTimestamp" to now,
                 "lastYieldTimestamp" to state.lastYieldTickTimestamp,
-                "referralCode" to state.referralCode,
+                "lastYieldTickTimestamp" to state.lastYieldTickTimestamp,
+                "referralCode" to (if (state.referralCode.isNotBlank()) state.referralCode else secretKey),
                 "referredBy" to state.referredBy,
+                "referralCount" to state.referralCount,
+                "activeReferredMiners" to state.activeReferredMiners,
                 "hardwareNodes" to hardwareNodesList,
                 "activeMiningRigs" to hardwareNodesList,
                 "depositHistory" to depositsList,
                 "withdrawalHistory" to withdrawalsList,
-                "uid" to secretKey,
+                "transactions" to allTransactionsList,
+                "spinHistory" to spinHistoryList,
+                "microTasks" to microTasksList,
+                "videoPromotions" to videoPromotionsList,
+                "isOnline" to true,
+                "onlineStatus" to "ONLINE",
+                "lastOnlineTimestamp" to now,
+                "lastSeenTimestamp" to now,
                 "email" to state.email,
-                "nodeId" to state.nodeId,
-                "baseFreeHashrateGh" to state.baseFreeHashrateGh,
-                "referralCount" to state.referralCount,
-                "activeReferredMiners" to state.activeReferredMiners,
                 "temporaryBoostHashrateGh" to state.temporaryBoostHashrateGh,
                 "temporaryBoostExpiry" to state.temporaryBoostExpiry,
                 "dailySpentUsdt" to state.dailySpentUsdt,
                 "lastDailySpinTimestamp" to state.lastDailySpinTimestamp,
-                "isFreeMiningActive" to state.isFreeMiningActive,
-                "freeMiningSessionStart" to state.freeMiningSessionStart,
-                "freeMiningSessionEnd" to state.freeMiningSessionEnd,
-                "lastYieldTickTimestamp" to state.lastYieldTickTimestamp,
                 "isKeyBackedUp" to state.isKeyBackedUp,
                 "isPinConfigured" to state.isPinConfigured,
                 "isBiometricEnabled" to state.isBiometricEnabled,
                 "role" to (if (state.isAdmin || SecretKeyUtils.isMasterAdminKey(secretKey)) "superadmin" else state.role),
                 "createdAt" to state.createdAt,
-                "lastSyncTimestamp" to System.currentTimeMillis()
+                "lastSyncTimestamp" to now
             )
 
             suspendCancellableCoroutine<Boolean> { continuation ->
                 db.collection("users").document(secretKey)
                     .set(docData, SetOptions.merge())
                     .addOnSuccessListener {
-                        Log.d(TAG, "Saved full user state to Firestore users/$secretKey successfully.")
-                        continuation.resume(true)
+                        Log.d("FIREBASE_SYNC", "SUCCESS: User state and all activities saved to Firestore: $secretKey")
+                        if (continuation.isActive) continuation.resume(true)
                     }
                     .addOnFailureListener { e ->
-                        Log.e(TAG, "Failed to save user under secret key: ${e.message}", e)
-                        continuation.resume(false)
+                        Log.e("FIREBASE_SYNC", "FAILED to write user to Firestore", e)
+                        if (continuation.isActive) continuation.resume(false)
                     }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error saving user under secret key: ${e.message}", e)
+            Log.e("FIREBASE_SYNC", "FAILED to write user to Firestore: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Records any user activity (both online actions and offline catchup events)
+     * to users/{userId}/activity_logs/{logId} and global activity_logs/{logId}.
+     */
+    suspend fun recordActivityLog(
+        userId: String,
+        action: String,
+        details: Map<String, Any?> = emptyMap()
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            if (userId.isBlank()) return@withContext false
+            val db = firestore ?: FirebaseFirestore.getInstance()
+            val now = System.currentTimeMillis()
+            val logId = "log-$now-${UUID.randomUUID().toString().take(6)}"
+            val logData = hashMapOf<String, Any?>(
+                "id" to logId,
+                "userId" to userId,
+                "action" to action,
+                "timestamp" to now,
+                "details" to details,
+                "platform" to "Android"
+            )
+            // 1. users/{userId}/activity_logs/{logId}
+            db.collection("users").document(userId)
+                .collection("activity_logs").document(logId)
+                .set(logData, SetOptions.merge())
+
+            // 2. Global activity_logs/{logId}
+            db.collection("activity_logs").document(logId)
+                .set(logData, SetOptions.merge())
+
+            Log.d("FIREBASE_SYNC", "Activity logged for user $userId: $action")
+            true
+        } catch (e: Exception) {
+            Log.e("FIREBASE_SYNC", "Failed to record activity log: ${e.message}", e)
+            false
+        }
+    }
+
+    /**
+     * Updates real-time online/offline presence status in Firestore.
+     */
+    suspend fun updateOnlineStatus(userId: String, isOnline: Boolean): Boolean = withContext(Dispatchers.IO) {
+        try {
+            if (userId.isBlank()) return@withContext false
+            val db = firestore ?: FirebaseFirestore.getInstance()
+            val now = System.currentTimeMillis()
+            val updateData = hashMapOf<String, Any?>(
+                "isOnline" to isOnline,
+                "onlineStatus" to (if (isOnline) "ONLINE" else "OFFLINE"),
+                "lastSeenTimestamp" to now,
+                if (isOnline) "lastOnlineTimestamp" to now else "lastOfflineTimestamp" to now
+            )
+            db.collection("users").document(userId)
+                .set(updateData, SetOptions.merge())
+            Log.d("FIREBASE_SYNC", "Presence updated for user $userId: ${if (isOnline) "ONLINE" else "OFFLINE"}")
+            true
+        } catch (e: Exception) {
+            Log.e("FIREBASE_SYNC", "Failed to update online presence: ${e.message}", e)
             false
         }
     }
@@ -514,43 +628,123 @@ class FirebaseManager(private val context: Context) {
                 }
             }
 
-            // Parse transactions
+            // Parse all transactions
+            val allTxRaw = snapshot.get("transactions") as? List<Map<String, Any>>
             val depositsRaw = snapshot.get("depositHistory") as? List<Map<String, Any>> ?: emptyList()
             val withdrawalsRaw = snapshot.get("withdrawalHistory") as? List<Map<String, Any>> ?: emptyList()
 
             val restoredTxList = mutableListOf<TransactionItem>()
-            depositsRaw.forEach { map ->
-                try {
-                    restoredTxList.add(
-                        TransactionItem(
-                            id = map["id"] as? String ?: "tx-${System.currentTimeMillis()}",
-                            type = TransactionType.DEPOSIT,
-                            amount = (map["amount"] as? Number)?.toDouble() ?: 0.0,
-                            currency = map["currency"] as? String ?: "USDT",
-                            timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis(),
-                            status = TransactionStatus.COMPLETED,
-                            description = map["description"] as? String ?: "Deposit Confirmed",
-                            txHash = map["txHash"] as? String,
-                            network = map["network"] as? String
+
+            if (!allTxRaw.isNullOrEmpty()) {
+                allTxRaw.forEach { map ->
+                    try {
+                        val typeStr = map["type"] as? String ?: TransactionType.DEPOSIT.name
+                        val type = try { TransactionType.valueOf(typeStr) } catch (_: Exception) { TransactionType.DEPOSIT }
+                        val statusStr = map["status"] as? String ?: TransactionStatus.COMPLETED.name
+                        val status = try { TransactionStatus.valueOf(statusStr) } catch (_: Exception) { TransactionStatus.COMPLETED }
+                        restoredTxList.add(
+                            TransactionItem(
+                                id = map["id"] as? String ?: "tx-${System.currentTimeMillis()}",
+                                type = type,
+                                amount = (map["amount"] as? Number)?.toDouble() ?: 0.0,
+                                currency = map["currency"] as? String ?: "USDT",
+                                timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+                                status = status,
+                                description = map["description"] as? String ?: "Transaction Record",
+                                address = map["address"] as? String,
+                                network = map["network"] as? String,
+                                txHash = map["txHash"] as? String,
+                                paymentId = map["paymentId"] as? String
+                            )
                         )
-                    )
-                } catch (_: Exception) {}
+                    } catch (_: Exception) {}
+                }
+            } else {
+                depositsRaw.forEach { map ->
+                    try {
+                        restoredTxList.add(
+                            TransactionItem(
+                                id = map["id"] as? String ?: "tx-${System.currentTimeMillis()}",
+                                type = TransactionType.DEPOSIT,
+                                amount = (map["amount"] as? Number)?.toDouble() ?: 0.0,
+                                currency = map["currency"] as? String ?: "USDT",
+                                timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+                                status = TransactionStatus.COMPLETED,
+                                description = map["description"] as? String ?: "Deposit Confirmed",
+                                txHash = map["txHash"] as? String,
+                                network = map["network"] as? String
+                            )
+                        )
+                    } catch (_: Exception) {}
+                }
+                withdrawalsRaw.forEach { map ->
+                    try {
+                        restoredTxList.add(
+                            TransactionItem(
+                                id = map["id"] as? String ?: "tx-${System.currentTimeMillis()}",
+                                type = TransactionType.WITHDRAWAL,
+                                amount = (map["amount"] as? Number)?.toDouble() ?: 0.0,
+                                currency = map["currency"] as? String ?: "USDT",
+                                timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+                                status = TransactionStatus.COMPLETED,
+                                description = map["description"] as? String ?: "Withdrawal Completed",
+                                address = map["address"] as? String
+                            )
+                        )
+                    } catch (_: Exception) {}
+                }
             }
-            withdrawalsRaw.forEach { map ->
+
+            // Parse spinHistory
+            val spinRaw = snapshot.get("spinHistory") as? List<Map<String, Any>> ?: emptyList()
+            val restoredSpins = spinRaw.mapNotNull { map ->
                 try {
-                    restoredTxList.add(
-                        TransactionItem(
-                            id = map["id"] as? String ?: "tx-${System.currentTimeMillis()}",
-                            type = TransactionType.WITHDRAWAL,
-                            amount = (map["amount"] as? Number)?.toDouble() ?: 0.0,
-                            currency = map["currency"] as? String ?: "USDT",
-                            timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis(),
-                            status = TransactionStatus.COMPLETED,
-                            description = map["description"] as? String ?: "Withdrawal Completed",
-                            address = map["address"] as? String
-                        )
-                    )
-                } catch (_: Exception) {}
+                    val id = map["id"] as? String ?: return@mapNotNull null
+                    val title = map["rewardTitle"] as? String ?: "Reward"
+                    val subtitle = map["rewardSubtitle"] as? String ?: ""
+                    val time = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis()
+                    val typeStr = map["rewardType"] as? String ?: SpinRewardType.GRID_TOKENS.name
+                    val rType = try { SpinRewardType.valueOf(typeStr) } catch (_: Exception) { SpinRewardType.GRID_TOKENS }
+                    val value = (map["value"] as? Number)?.toDouble() ?: 0.0
+                    SpinHistoryRecord(id, title, subtitle, time, rType, value)
+                } catch (_: Exception) { null }
+            }
+
+            // Parse microTasks
+            val microRaw = snapshot.get("microTasks") as? List<Map<String, Any>> ?: emptyList()
+            val restoredMicroTasks = microRaw.mapNotNull { map ->
+                try {
+                    val id = map["id"] as? String ?: return@mapNotNull null
+                    val platStr = map["platform"] as? String ?: TaskPlatform.WHATSAPP_STATUS.name
+                    val platform = try { TaskPlatform.valueOf(platStr) } catch (_: Exception) { TaskPlatform.WHATSAPP_STATUS }
+                    val submittedAt = (map["submittedAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
+                    val initViews = (map["initialViewCount"] as? Number)?.toInt() ?: 0
+                    val finalViews = (map["finalViewCount"] as? Number)?.toInt() ?: 0
+                    val statusStr = map["status"] as? String ?: PromoStatus.PENDING_REVIEW.name
+                    val status = try { PromoStatus.valueOf(statusStr) } catch (_: Exception) { PromoStatus.PENDING_REVIEW }
+                    val rewardUsdt = (map["rewardUsdt"] as? Number)?.toDouble() ?: 0.0
+                    val notes = map["notes"] as? String ?: ""
+                    MicroTaskSubmission(id, platform, submittedAt, initViews, finalViews, status, rewardUsdt, notes)
+                } catch (_: Exception) { null }
+            }
+
+            // Parse videoPromotions
+            val videoRaw = snapshot.get("videoPromotions") as? List<Map<String, Any>> ?: emptyList()
+            val restoredVideos = videoRaw.mapNotNull { map ->
+                try {
+                    val id = map["id"] as? String ?: return@mapNotNull null
+                    val platStr = map["platform"] as? String ?: TaskPlatform.YOUTUBE_VIDEO.name
+                    val platform = try { TaskPlatform.valueOf(platStr) } catch (_: Exception) { TaskPlatform.YOUTUBE_VIDEO }
+                    val videoUrl = map["videoUrl"] as? String ?: ""
+                    val channel = map["channelOrHandle"] as? String ?: ""
+                    val submittedAt = (map["submittedAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
+                    val estViews = (map["estimatedViews"] as? Number)?.toInt() ?: 0
+                    val statusStr = map["status"] as? String ?: PromoStatus.PENDING_REVIEW.name
+                    val status = try { PromoStatus.valueOf(statusStr) } catch (_: Exception) { PromoStatus.PENDING_REVIEW }
+                    val rewardUsdt = (map["rewardUsdt"] as? Number)?.toDouble() ?: 0.0
+                    val feedback = map["reviewerFeedback"] as? String
+                    VideoPromotionSubmission(id, platform, videoUrl, channel, submittedAt, estViews, status, rewardUsdt, feedback)
+                } catch (_: Exception) { null }
             }
 
             val restored = UserMiningState(
@@ -573,6 +767,9 @@ class FirebaseManager(private val context: Context) {
                 freeMiningSessionEnd = sessionEnd,
                 userRigs = restoredRigs,
                 transactions = restoredTxList,
+                spinHistory = restoredSpins,
+                microTasks = restoredMicroTasks,
+                videoPromotions = restoredVideos,
                 lastYieldTickTimestamp = lastYieldTick,
                 createdAt = createdAt,
                 isKeyBackedUp = true,

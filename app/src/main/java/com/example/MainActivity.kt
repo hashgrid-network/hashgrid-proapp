@@ -113,12 +113,17 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Throwable) {
             Log.w("MainActivity", "Keyguard check note: ${e.message}")
         }
-        // Note: If user minimized app (e.g. checked WhatsApp/browser) without locking the phone screen,
-        // ACTION_SCREEN_OFF did not fire and isKeyguardLocked is false, so app remains unlocked upon return!
+        viewModel.setUserOnline(true)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        viewModel.setUserOnline(false)
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        viewModel.setUserOnline(false)
         try {
             unregisterReceiver(screenOffReceiver)
         } catch (_: Throwable) {}

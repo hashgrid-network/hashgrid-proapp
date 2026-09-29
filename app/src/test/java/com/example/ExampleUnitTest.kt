@@ -289,4 +289,67 @@ class ExampleUnitTest {
         assertTrue(defaultState.userRigs.isEmpty())
         assertTrue(defaultState.transactions.isEmpty())
     }
+
+    @Test
+    fun testNewUserFirestoreDocumentSchema() {
+        val secretKey = "HG-7K9P-M2X4-W8Q1-J5R3"
+        val state = UserMiningState(
+            uid = secretKey,
+            secretKey = secretKey,
+            nodeId = "NODE-WEB3-#J5R3",
+            minerBalanceUsdt = 0.0,
+            gridBalance = 0.0,
+            baseFreeHashrateGh = 2.0,
+            referralCount = 0,
+            activeReferredMiners = 0,
+            referralCode = secretKey,
+            userRigs = emptyList(),
+            transactions = emptyList(),
+            isAdmin = false,
+            role = "user",
+            isAuthenticated = true
+        )
+
+        assertEquals(secretKey, state.uid)
+        assertEquals(secretKey, state.secretKey)
+        assertEquals("NODE-WEB3-#J5R3", state.nodeId)
+        assertFalse(state.isAdmin)
+        assertEquals(0.0, state.minerBalanceUsdt, 0.0001)
+        assertEquals(0.0, state.gridBalance, 0.0001)
+        assertEquals(2.0, state.baseFreeHashrateGh, 0.0001)
+        assertEquals(2.0, state.aggregateFreeHashrateGh, 0.0001)
+        assertFalse(state.isFreeMiningActive)
+        assertEquals(0L, state.freeMiningSessionStart)
+        assertEquals(0L, state.freeMiningSessionEnd)
+        assertTrue(state.userRigs.isEmpty())
+        assertEquals(secretKey, state.referralCode)
+        assertEquals(0, state.referralCount)
+    }
+
+    @Test
+    fun testAllActivitiesAndPresenceDataIntegrity() {
+        val now = System.currentTimeMillis()
+        val spin = SpinHistoryRecord("spin-1", "15 GRID", "Free Tokens", now, SpinRewardType.GRID_TOKENS, 15.0)
+        val task = MicroTaskSubmission("task-1", TaskPlatform.WHATSAPP_STATUS, now, 10, 50, PromoStatus.APPROVED, 5.0, "Proof")
+        val promo = VideoPromotionSubmission("vid-1", TaskPlatform.YOUTUBE_VIDEO, "https://youtube.com/test", "@channel", now, 150, PromoStatus.APPROVED, 15.0)
+        val tx = TransactionItem("tx-1", TransactionType.DEPOSIT, 100.0, "USDT", now, TransactionStatus.COMPLETED, "Deposit")
+
+        val state = UserMiningState(
+            uid = "HG-TEST-001",
+            secretKey = "HG-TEST-001",
+            gridBalance = 15.0,
+            minerBalanceUsdt = 120.0,
+            spinHistory = listOf(spin),
+            microTasks = listOf(task),
+            videoPromotions = listOf(promo),
+            transactions = listOf(tx)
+        )
+
+        assertEquals(1, state.spinHistory.size)
+        assertEquals(15.0, state.spinHistory.first().value, 0.001)
+        assertEquals(1, state.microTasks.size)
+        assertEquals(PromoStatus.APPROVED, state.microTasks.first().status)
+        assertEquals(1, state.videoPromotions.size)
+        assertEquals(1, state.transactions.size)
+    }
 }
