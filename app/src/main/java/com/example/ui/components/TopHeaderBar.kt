@@ -27,6 +27,8 @@ fun TopHeaderBar(
     nodeId: String,
     isColdStorageSynced: Boolean,
     preLaunchPriceUsd: Double = 0.01,
+    isCloudSynced: Boolean = false,
+    connectionErrorMsg: String? = null,
     tickers: List<CryptoTickerPrice> = emptyList(),
     modifier: Modifier = Modifier
 ) {
@@ -84,6 +86,43 @@ fun TopHeaderBar(
                             .testTag("cold_storage_badge")
                     )
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Center: Real-Time Heartbeat Status Indicator Pill
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(20.dp))
+                .background(if (isCloudSynced) Color(0xFF1B5E20).copy(alpha = 0.2f) else Color(0xFFB71C1C).copy(alpha = 0.2f))
+                .border(
+                    1.dp,
+                    if (isCloudSynced) Color(0xFF4CAF50).copy(alpha = 0.6f) else Color(0xFFF44336).copy(alpha = 0.6f),
+                    RoundedCornerShape(20.dp)
+                )
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .testTag("cloud_heartbeat_pill")
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(if (isCloudSynced) Color(0xFF4CAF50) else Color(0xFFF44336))
+                )
+                Text(
+                    text = if (isCloudSynced) "CLOUD LIVE" else (connectionErrorMsg ?: "DISCONNECTED"),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = if (isCloudSynced) Color(0xFF81C784) else Color(0xFFE57373),
+                        fontSize = 8.5.sp
+                    ),
+                    maxLines = 1
+                )
             }
         }
 

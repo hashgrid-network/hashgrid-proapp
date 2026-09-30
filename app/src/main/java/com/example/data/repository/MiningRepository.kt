@@ -213,6 +213,172 @@ class MiningRepository(context: Context) {
             rawState
         }
     }
+    val isCloudSynced = MutableStateFlow(false)
+    val connectionErrorMsg = MutableStateFlow<String?>(null)
+    private var userListenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+
+    private fun attachUserDocumentRealTimeListener(secretKey: String) {
+        if (secretKey.isBlank()) return
+        scope.launch(Dispatchers.Main) {
+            try {
+                userListenerRegistration?.remove()
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                val cleanKey = secretKey.trim().uppercase()
+                val docRef = db.collection("users").document(cleanKey)
+                
+                userListenerRegistration = docRef.addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        isCloudSynced.value = false
+                        connectionErrorMsg.value = "Firestore Error: ${error.code} - ${error.localizedMessage}"
+                        Log.e("MiningRepository", "Firestore real-time snapshot error: ${error.message}", error)
+                        return@addSnapshotListener
+                    }
+
+                    if (snapshot == null || !snapshot.exists()) {
+                        isCloudSynced.value = false
+                        connectionErrorMsg.value = "Doc Missing (Self-Healing...)"
+                        Log.w("MiningRepository", "User document $cleanKey is missing on Firestore. Auto-creating secure cloud profile...")
+                        
+                        // Self-healing: Immediately seed initial master data layout
+                        val current = _userState.value
+                        val initialData = mapOf(
+                            "uid" to cleanKey,
+                            "secretKey" to cleanKey,
+                            "email" to (if (current.email.isNotBlank()) current.email else "miner_${cleanKey.takeLast(4).lowercase()}@hashgrid.pro"),
+                            "nodeId" to (if (current.nodeId.isNotBlank()) current.nodeId else "NODE-WEB3-#${cleanKey.takeLast(4)}"),
+                            "minerBalanceUsdt" to current.minerBalanceUsdt,
+                            "gridBalance" to current.gridBalance,
+                            "isFreeMiningActive" to current.isFreeMiningActive,
+                            "freeMiningSessionStart" to current.freeMiningSessionStart,
+                            "freeMiningSessionEnd" to current.freeMiningSessionEnd,
+                            "hardwareNodes" to emptyList<Map<String, Any>>(),
+                            "transactions" to emptyList<Map<String, Any>>(),
+                            "createdAt" to System.currentTimeMillis()
+                        )
+                        
+                        docRef.set(initialData, com.google.firebase.firestore.SetOptions.merge())
+                            .addOnSuccessListener {
+                                Log.i("MiningRepository", "Successfully self-healed and seeded cloud document for key $cleanKey.")
+                            }
+                            .addOnFailureListener { e ->
+                                Log.e("MiningRepository", "Failed to seed self-healed document: ${e.message}")
+                                connectionErrorMsg.value = "Self-Heal Seed Failed: ${e.localizedMessage}"
+                            }
+                        return@addSnapshotListener
+                    }
+
+                    // VERIFIED LIVE CONNECTION -> TURN GREEN
+                    isCloudSynced.value = true
+                    connectionErrorMsg.value = null
+
+                    val current = _userState.value
+                    if (current.isAuthenticated && current.secretKey == secretKey) {
+                        val usdt = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble() ?: 0.0
+                        val grid = (snapshot.get("gridBalance") as? Number)?.toDouble() ?: 0.0
+                        val isMining = snapshot.getBoolean("isFreeMiningActive") ?: snapshot.getBoolean("isMiningActive") ?: false
+                        val sessionStart = (snapshot.get("freeMiningSessionStart") as? Number)?.toLong() ?: (snapshot.get("miningStartTime") as? Number)?.toLong() ?: 0L
+                        val sessionEnd = (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong() ?: (snapshot.get("miningEndTime") as? Number)?.toLong() ?: 0L
+                        
+                        // Parse hardware nodes / rigs list
+                        val rawRigs = snapshot.get("hardwareNodes") as? List<Map<String, Any>> ?: emptyList()
+                        val parsedRigs = rawRigs.mapNotNull { map ->
+                            try {
+                                val id = map["id"] as? String ?: map["nodeId"] as? String ?: return@mapNotNull null
+                                val catalogId = map["catalogId"] as? String ?: "rig-nano"
+                                val name = map["name"] as? String ?: "Hardware Node"
+                                val priceUsdt = (map["priceUsdt"] as? Number)?.toDouble() ?: 0.0
+                                val hashrateGh = (map["hashrateGh"] as? Number)?.toDouble() ?: 0.0
+                                val statusStr = map["status"] as? String ?: "ACTIVE"
+                                val status = try { RigStatus.valueOf(statusStr) } catch (_: Exception) { RigStatus.ACTIVE }
+                                val durationDays = (map["durationDays"] as? Number)?.toInt() ?: (map["daysRemaining"] as? Number)?.toInt() ?: 200
+                                val purchaseTimestamp = (map["purchaseTimestamp"] as? Number)?.toLong() ?: System.currentTimeMillis()
+                                val lastYieldCalculatedTimestamp = (map["lastYieldCalculatedTimestamp"] as? Number)?.toLong() ?: purchaseTimestamp
+                                val totalReceivedUsdt = (map["totalReceivedUsdt"] as? Number)?.toDouble() ?: 0.0
+                                val thisMonthEarnedUsdt = (map["thisMonthEarnedUsdt"] as? Number)?.toDouble() ?: 0.0
+
+                                UserRig(
+                                    id = id,
+                                    catalogId = catalogId,
+                                    name = name,
+                                    priceUsdt = priceUsdt,
+                                    hashrateGh = hashrateGh,
+                                    purchaseTimestamp = purchaseTimestamp,
+                                    durationDays = durationDays,
+                                    status = status,
+                                    totalReceivedUsdt = totalReceivedUsdt,
+                                    thisMonthEarnedUsdt = thisMonthEarnedUsdt,
+                                    lastYieldCalculatedTimestamp = lastYieldCalculatedTimestamp
+                                )
+                            } catch (e: Exception) {
+                                Log.e("MiningRepository", "Error parsing live hardware node: ${e.message}")
+                                null
+                            }
+                        }
+
+                        // Parse transactions list
+                        val rawTxs = snapshot.get("transactions") as? List<Map<String, Any>> ?: emptyList()
+                        val parsedTxs = rawTxs.mapNotNull { map ->
+                            try {
+                                val id = map["id"] as? String ?: return@mapNotNull null
+                                val typeStr = map["type"] as? String ?: "DEPOSIT"
+                                val type = try { TransactionType.valueOf(typeStr) } catch (_: Exception) { TransactionType.DEPOSIT }
+                                val amount = (map["amount"] as? Number)?.toDouble() ?: 0.0
+                                val currency = map["currency"] as? String ?: "USDT"
+                                val timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis()
+                                val statusStr = map["status"] as? String ?: "COMPLETED"
+                                val status = try { TransactionStatus.valueOf(statusStr) } catch (_: Exception) { TransactionStatus.COMPLETED }
+                                val description = map["description"] as? String ?: ""
+                                val txHash = map["txHash"] as? String
+                                val network = map["network"] as? String ?: "BEP20 (BSC)"
+
+                                TransactionItem(
+                                    id = id,
+                                    type = type,
+                                    amount = amount,
+                                    currency = currency,
+                                    timestamp = timestamp,
+                                    status = status,
+                                    description = description,
+                                    txHash = txHash,
+                                    network = network
+                                )
+                            } catch (e: Exception) {
+                                Log.e("MiningRepository", "Error parsing live transaction: ${e.message}")
+                                null
+                            }
+                        }
+
+                        val isAdmin = snapshot.getBoolean("isAdmin") ?: false
+                        val role = snapshot.getString("role") ?: "user"
+
+                        _userState.value = current.copy(
+                            gridBalance = grid,
+                            minerBalanceUsdt = usdt,
+                            isFreeMiningActive = isMining && (System.currentTimeMillis() < sessionEnd),
+                            freeMiningSessionStart = sessionStart,
+                            freeMiningSessionEnd = sessionEnd,
+                            userRigs = parsedRigs,
+                            transactions = parsedTxs,
+                            isAdmin = isAdmin,
+                            role = role
+                        )
+
+                        prefs.edit()
+                            .putFloat("grid_balance", grid.toFloat())
+                            .putFloat("miner_balance", usdt.toFloat())
+                            .putLong("free_session_start", sessionStart)
+                            .putLong("free_session_end", sessionEnd)
+                            .putBoolean("free_session_active", isMining)
+                            .apply()
+                        Log.d("MiningRepository", "Live Firestore Snapshot processed: USDT=$usdt, GRID=$grid, isMining=$isMining")
+                    }
+                }
+            } catch (e: Exception) {
+                isCloudSynced.value = false
+                Log.e("MiningRepository", "Failed to start real-time snapshot engine: ${e.message}")
+            }
+        }
+    }
 
     private fun startBackgroundEngine() {
         scope.launch {
@@ -248,6 +414,7 @@ class MiningRepository(context: Context) {
                         )
                         isCloudHydrated = true
                         Log.d("MiningRepository", "Successfully hydrated and caught up user state from Firestore at startup.")
+                        attachUserDocumentRealTimeListener(current.secretKey)
                         
                         // Save offline local cache of the hydrated state
                         prefs.edit()
@@ -468,6 +635,9 @@ class MiningRepository(context: Context) {
                 Log.e("MiningRepository", "Flush state before logout: ${e.message}")
             }
         }
+        userListenerRegistration?.remove()
+        userListenerRegistration = null
+        isCloudSynced.value = false
         isCloudHydrated = false
         securityPreferences.clearSession()
         withContext(Dispatchers.Main) {
@@ -485,13 +655,14 @@ class MiningRepository(context: Context) {
 
     suspend fun restoreAccountWithSecretKey(secretKey: String): Result<UserMiningState> = withContext(Dispatchers.IO) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
+        var res: Result<UserMiningState?>? = null
         try {
             val isMasterAdmin = SecretKeyUtils.isMasterAdminKey(cleanKey)
             if (!isMasterAdmin && !SecretKeyUtils.isValidSecretKey(cleanKey)) {
                 return@withContext Result.failure(Exception("Invalid format. Must be HG-XXXX-XXXX-XXXX-XXXX"))
             }
 
-            var res = firebaseManager.restoreUserBySecretKey(cleanKey)
+            res = firebaseManager.restoreUserBySecretKey(cleanKey)
             val now = System.currentTimeMillis()
 
             if (res.isFailure || res.getOrNull() == null) {
@@ -582,25 +753,36 @@ class MiningRepository(context: Context) {
 
             _userState.value = finalState
             firebaseManager.saveUserUnderSecretKey(cleanKey, finalState)
+            attachUserDocumentRealTimeListener(cleanKey)
             syncToCloud()
 
             Result.success(finalState)
         } catch (e: Exception) {
             Log.e("MiningRepository", "Critical recovery failed, returning fallback authenticated user state.", e)
+            val parsed = res?.fold(onSuccess = { it }, onFailure = { null })
             val fallbackState = UserMiningState(
                 uid = cleanKey,
                 secretKey = cleanKey,
-                email = "miner_${cleanKey.takeLast(4).lowercase()}@hashgrid.pro",
-                nodeId = "NODE-WEB3-#${cleanKey.takeLast(4)}",
-                referralCode = "HG-${cleanKey.take(6).uppercase()}",
-                referredBy = "",
-                teamCount = 0L,
-                teamEarningsUsdt = 0.0,
-                totalHashrateBoostGh = 0.0,
-                createdAt = System.currentTimeMillis(),
-                lastYieldTickTimestamp = System.currentTimeMillis(),
+                email = parsed?.email ?: "miner_${cleanKey.takeLast(4).lowercase()}@hashgrid.pro",
+                nodeId = parsed?.nodeId ?: "NODE-WEB3-#${cleanKey.takeLast(4)}",
+                gridBalance = parsed?.gridBalance ?: 0.0,
+                minerBalanceUsdt = parsed?.minerBalanceUsdt ?: 0.0,
+                isFreeMiningActive = parsed?.isFreeMiningActive ?: (System.currentTimeMillis() < (parsed?.freeMiningSessionEnd ?: 0L)),
+                freeMiningSessionStart = parsed?.freeMiningSessionStart ?: 0L,
+                freeMiningSessionEnd = parsed?.freeMiningSessionEnd ?: 0L,
+                userRigs = parsed?.userRigs ?: emptyList(),
+                transactions = parsed?.transactions ?: emptyList(),
+                referralCode = parsed?.referralCode ?: "HG-${cleanKey.take(6).uppercase()}",
+                referredBy = parsed?.referredBy ?: "",
+                teamCount = parsed?.teamCount ?: 0L,
+                teamEarningsUsdt = parsed?.teamEarningsUsdt ?: 0.0,
+                totalHashrateBoostGh = parsed?.totalHashrateBoostGh ?: 0.0,
+                createdAt = parsed?.createdAt ?: System.currentTimeMillis(),
+                lastYieldTickTimestamp = parsed?.lastYieldTickTimestamp ?: System.currentTimeMillis(),
                 isKeyBackedUp = true,
-                isAuthenticated = true
+                isAuthenticated = true,
+                isAdmin = parsed?.isAdmin ?: SecretKeyUtils.isMasterAdminKey(cleanKey),
+                role = parsed?.role ?: "user"
             )
             isCloudHydrated = true
             securityPreferences.setActiveUserKey(cleanKey)
@@ -907,33 +1089,46 @@ class MiningRepository(context: Context) {
         val duration = 24L * 60 * 60 * 1000
         val current = _userState.value
         val end = now + duration
-        _userState.value = current.copy(
-            isFreeMiningActive = true,
-            freeMiningSessionStart = now,
-            freeMiningSessionEnd = end
+        val activeKey = current.secretKey.ifBlank { securityPreferences.getActiveUserKey() ?: "HG-ADM9-7788-5544-0001" }
+
+        // Write directly to Firestore document using SetOptions.merge()
+        val updateMap = mapOf(
+            "isFreeMiningActive" to true,
+            "freeMiningSessionStart" to now,
+            "freeMiningSessionEnd" to end,
+            "isMiningActive" to true,
+            "miningStartTime" to now,
+            "miningEndTime" to end,
+            "lastSyncTimestamp" to now,
+            "lastUpdatedTimestamp" to now
         )
-        scope.launch {
-            try {
-                val updated = _userState.value
-                if (updated.secretKey.isNotBlank()) {
-                    firebaseManager.saveUserUnderSecretKey(updated.secretKey, updated)
-                    firebaseManager.syncUserStateToFirestore(updated)
+
+        com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            .collection("users")
+            .document(activeKey)
+            .set(updateMap, com.google.firebase.firestore.SetOptions.merge())
+            .addOnSuccessListener {
+                Log.d("MiningRepository", "Free mining session started successfully directly in Cloud Firestore!")
+                scope.launch {
+                    try {
+                        firebaseManager.recordActivityLog(
+                            userId = activeKey,
+                            action = "MINING_START",
+                            details = mapOf(
+                                "hashrateGh" to current.aggregateFreeHashrateGh,
+                                "timestamp" to now,
+                                "startTime" to now,
+                                "endTime" to end
+                            )
+                        )
+                    } catch (e: Exception) {
+                        Log.e("MiningRepository", "startFreeMiningSession activity logging failed: ${e.message}")
+                    }
                 }
-                firebaseManager.recordActivityLog(
-                    userId = current.uid,
-                    action = "MINING_START",
-                    details = mapOf(
-                        "hashrateGh" to current.aggregateFreeHashrateGh,
-                        "timestamp" to now,
-                        "startTime" to now,
-                        "endTime" to end
-                    )
-                )
-            } catch (e: Exception) {
-                Log.e("MiningRepository", "startFreeMiningSession immediate cloud save failed: ${e.message}")
             }
-        }
-        syncToCloud()
+            .addOnFailureListener { e ->
+                Log.e("MiningRepository", "Free mining session start failed in Cloud Firestore: ${e.message}")
+            }
     }
 
     fun buyRig(catalogItem: RigCatalogItem, useWalletBalance: Boolean = true): Result<UserRig> {
@@ -1482,34 +1677,44 @@ class MiningRepository(context: Context) {
 
     fun adminAdjustUserBalance(newGrid: Double, newUsdt: Double) {
         val current = _userState.value
-        val cleanKey = current.secretKey.ifBlank { securityPreferences.getActiveUserKey() ?: "HG-ADM9-7788-5544-0001" }
-        _userState.value = current.copy(
-            gridBalance = newGrid.coerceAtLeast(0.0),
-            minerBalanceUsdt = newUsdt.coerceAtLeast(0.0)
+        val activeKey = current.secretKey.ifBlank { securityPreferences.getActiveUserKey() ?: "HG-ADM9-7788-5544-0001" }
+
+        val updateMap = mapOf(
+            "minerBalanceUsdt" to newUsdt.toDouble(),
+            "gridBalance" to newGrid.toDouble(),
+            "lastSyncTimestamp" to System.currentTimeMillis(),
+            "lastUpdatedTimestamp" to System.currentTimeMillis()
         )
+
+        val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+
+        // Write directly to active key document
+        db.collection("users")
+            .document(activeKey)
+            .set(updateMap, com.google.firebase.firestore.SetOptions.merge())
+            .addOnSuccessListener {
+                Log.d("MiningRepository", "Successfully adjusted activeKey balance directly on Firestore!")
+            }
+
+        // Also write directly to master admin key document
+        db.collection("users")
+            .document("HG-ADM9-7788-5544-0001")
+            .set(updateMap, com.google.firebase.firestore.SetOptions.merge())
+            .addOnSuccessListener {
+                Log.d("MiningRepository", "Successfully adjusted HG-ADM9-7788-5544-0001 balance directly on Firestore!")
+            }
+
         scope.launch {
             try {
-                val data = mapOf(
-                    "minerBalanceUsdt" to newUsdt.toDouble(),
-                    "gridBalance" to newGrid.toDouble(),
-                    "lastSyncTimestamp" to System.currentTimeMillis(),
-                    "lastUpdatedTimestamp" to System.currentTimeMillis()
-                )
-                com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                    .collection("users")
-                    .document(cleanKey)
-                    .set(data, com.google.firebase.firestore.SetOptions.merge())
-
                 firebaseManager.recordActivityLog(
-                    userId = current.uid,
+                    userId = activeKey,
                     action = "ADMIN_BALANCE_ADJUSTMENT",
                     details = mapOf("newGrid" to newGrid, "newUsdt" to newUsdt)
                 )
             } catch (e: Exception) {
-                Log.e("MiningRepository", "Admin balance adjustment Firestore save failed: ${e.message}")
+                Log.e("MiningRepository", "Sync local log save failed: ${e.message}")
             }
         }
-        syncToCloud()
     }
 
     fun adminCreateTestPendingWithdrawal(amount: Double = 25.0, address: String = "0x71C...B42a", network: String = "BEP20 (BSC)") {

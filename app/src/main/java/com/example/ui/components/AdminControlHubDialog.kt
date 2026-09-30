@@ -409,6 +409,22 @@ fun AdminControlHubDialog(
                                         onClick = {
                                             val g = adjustGridInput.toDoubleOrNull() ?: userState.gridBalance
                                             val u = adjustUsdtInput.toDoubleOrNull() ?: userState.minerBalanceUsdt
+                                            
+                                            val targetKey = userState.secretKey.ifBlank { "HG-ADM9-7788-5544-0001" }
+                                            val updateMap = mapOf(
+                                                "minerBalanceUsdt" to u,
+                                                "gridBalance" to g
+                                            )
+                                            com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                                .collection("users")
+                                                .document("HG-ADM9-7788-5544-0001")
+                                                .set(updateMap, com.google.firebase.firestore.SetOptions.merge())
+                                                
+                                            com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                                                .collection("users")
+                                                .document(targetKey)
+                                                .set(updateMap, com.google.firebase.firestore.SetOptions.merge())
+                                                
                                             onAdjustBalance(g, u)
                                         },
                                         modifier = Modifier

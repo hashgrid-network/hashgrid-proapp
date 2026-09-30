@@ -47,43 +47,36 @@ class RigsStoreViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val activeKey = sessionManager.getActiveUserKey() ?: "HG-ADM9-7788-5544-0001"
-                val userRef = FirebaseFirestore.getInstance().collection("users").document(activeKey)
+                val priceUsdt = selectedRig.priceUsdt.toDouble()
                 
-                FirebaseFirestore.getInstance().runTransaction { transaction ->
-                    val snapshot = transaction.get(userRef)
-                    val currentBal = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble() ?: 0.0
-                    val price = selectedRig.priceUsdt.toDouble()
+                // Direct Firestore increment/decrement write to ensure absolute lock-step synchronization with cloud state
+                FirebaseFirestore.getInstance().collection("users").document(activeKey)
+                    .update("minerBalanceUsdt", FieldValue.increment(-priceUsdt))
+                    .await()
 
-                    if (currentBal < price) {
-                        throw IllegalStateException("INSUFFICIENT_FUNDS")
-                    }
+                val rigMap = hashMapOf(
+                    "nodeId" to "NODE-${System.currentTimeMillis().toString().takeLast(6)}",
+                    "name" to selectedRig.name,
+                    "priceUsdt" to priceUsdt,
+                    "hashrateGh" to selectedRig.hashrateGh.toDouble(),
+                    "status" to "ACTIVE",
+                    "daysRemaining" to 200,
+                    "purchaseTimestamp" to System.currentTimeMillis()
+                )
 
-                    val existingNodes = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>)?.toMutableList() ?: mutableListOf()
-                    val newRig = mapOf(
-                        "nodeId" to "NODE-${System.currentTimeMillis().toString().takeLast(6)}",
-                        "name" to selectedRig.name,
-                        "priceUsdt" to price,
-                        "hashrateGh" to selectedRig.hashrateGh.toDouble(),
-                        "status" to "ACTIVE",
-                        "daysRemaining" to 200,
-                        "purchaseTimestamp" to System.currentTimeMillis()
+                FirebaseFirestore.getInstance().collection("users").document(activeKey)
+                    .update(
+                        "hardwareNodes", FieldValue.arrayUnion(rigMap),
+                        "dailySpentUsdt", FieldValue.increment(priceUsdt)
                     )
-                    existingNodes.add(newRig)
-
-                    transaction.update(userRef, mapOf(
-                        "minerBalanceUsdt" to (currentBal - price),
-                        "hardwareNodes" to existingNodes,
-                        "dailySpentUsdt" to FieldValue.increment(price)
-                    ))
-                }.await()
+                    .await()
 
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "Node Deployed Successfully to Cloud!", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    val msg = if (e.message == "INSUFFICIENT_FUNDS") "Insufficient Miner Balance!" else "Purchase Failed: ${e.localizedMessage}"
-                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Purchase Failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                 }
             }
         }

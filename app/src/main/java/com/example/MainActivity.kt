@@ -178,6 +178,8 @@ fun MainApp(
     val showSuccessDialog by viewModel.showPaymentSuccessDialog.collectAsStateWithLifecycle()
     val lastConfirmedPayment by viewModel.lastConfirmedPayment.collectAsStateWithLifecycle()
     val isCheckingStatus by viewModel.isCheckingPaymentStatus.collectAsStateWithLifecycle()
+    val isCloudSynced by viewModel.isCloudSynced.collectAsStateWithLifecycle()
+    val connectionErrorMsg by viewModel.connectionErrorMsg.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -220,6 +222,8 @@ fun MainApp(
                 nodeId = userState.nodeId,
                 isColdStorageSynced = userState.isColdStorageSynced,
                 preLaunchPriceUsd = gridPriceUsd,
+                isCloudSynced = isCloudSynced,
+                connectionErrorMsg = connectionErrorMsg,
                 modifier = Modifier.statusBarsPadding()
             )
         },

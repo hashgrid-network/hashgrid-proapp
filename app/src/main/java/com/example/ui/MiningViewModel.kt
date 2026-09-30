@@ -37,6 +37,8 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     val userState: StateFlow<UserMiningState> = repository.userState
     val cryptoPrices: StateFlow<List<CryptoTickerPrice>> = repository.cryptoPrices
     val gridPriceUsd: StateFlow<Double> = repository.gridPriceUsd
+    val isCloudSynced: StateFlow<Boolean> = repository.isCloudSynced.asStateFlow()
+    val connectionErrorMsg: StateFlow<String?> = repository.connectionErrorMsg.asStateFlow()
 
     fun updateGridPrice(newPrice: Double) {
         viewModelScope.launch {
