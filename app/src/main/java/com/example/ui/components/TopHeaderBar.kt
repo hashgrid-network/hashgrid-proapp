@@ -38,74 +38,51 @@ fun TopHeaderBar(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left: Institutional Node ID & Cold Storage Sync Status Badge
+        // Left: High-End Sacred Geometry Logo & "HashGrid Pro" Title
         Row(
             modifier = Modifier.weight(1f, fill = false),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Box(
+            Icon(
+                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_sacred_triangle),
+                contentDescription = "The Quantum Apex Matrix Logo",
+                tint = Color.Unspecified, // Keeps gold/cyan/emerald custom colors
                 modifier = Modifier
-                    .size(32.dp)
-                    .clip(CircleShape)
-                    .background(GoldPrimary.copy(alpha = 0.15f))
-                    .border(1.dp, GoldPrimary.copy(alpha = 0.4f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Shield,
-                    contentDescription = "Node Shield",
-                    tint = GoldPrimary,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
+                    .size(36.dp)
+                    .testTag("top_header_sacred_triangle")
+            )
             Column {
                 Text(
-                    text = "INSTITUTIONAL NODE",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 8.5.sp,
-                        color = TextMuted,
-                        letterSpacing = 0.8.sp
+                    text = "HashGrid Pro",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        color = TextGold,
+                        letterSpacing = 1.sp,
+                        fontSize = 15.sp
                     )
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
                         text = nodeId,
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 8.5.sp,
+                            color = CyanAccent,
+                            fontWeight = FontWeight.Bold
                         ),
                         maxLines = 1,
                         modifier = Modifier.testTag("node_id_badge")
                     )
-                    Text(
-                        text = "•",
-                        style = MaterialTheme.typography.labelSmall.copy(color = TextMuted)
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(if (isColdStorageSynced) EmeraldAccent else Color.Gray)
+                            .testTag("cold_storage_badge")
                     )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                        modifier = Modifier.testTag("cold_storage_badge")
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(if (isColdStorageSynced) EmeraldAccent else Color.Gray)
-                        )
-                        Text(
-                            text = if (isColdStorageSynced) "Cold-Storage Synced" else "Syncing...",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isColdStorageSynced) TextEmerald else TextMuted,
-                                fontSize = 10.sp
-                            ),
-                            maxLines = 1
-                        )
-                    }
                 }
             }
         }

@@ -87,22 +87,15 @@ fun WelcomeAuthScreen(
         ) {
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Branding Header
-            Box(
+            // High-End Sacred Triangle Branding Header
+            Icon(
+                painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_sacred_triangle),
+                contentDescription = "The Quantum Apex Matrix Logo",
+                tint = Color.Unspecified, // Keeps gold/cyan/emerald custom colors
                 modifier = Modifier
-                    .size(76.dp)
-                    .clip(CircleShape)
-                    .background(DarkNavySurface)
-                    .border(2.dp, GoldPrimary, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.Shield,
-                    contentDescription = null,
-                    tint = GoldPrimary,
-                    modifier = Modifier.size(42.dp)
-                )
-            }
+                    .size(96.dp)
+                    .testTag("welcome_sacred_triangle_logo")
+            )
 
             Spacer(modifier = Modifier.height(14.dp))
 
