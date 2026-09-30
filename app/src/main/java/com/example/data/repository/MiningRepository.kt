@@ -61,7 +61,7 @@ class MiningRepository(context: Context) {
     fun applyOfflineCatchUpYield(state: UserMiningState, now: Long = System.currentTimeMillis()): UserMiningState {
         var grid = state.gridBalance
         var usdt = state.minerBalanceUsdt
-        var isMiningActive = state.isFreeMiningActive
+        var isMiningActive = state.isFreeMiningActive || (now < state.freeMiningSessionEnd)
         val lastTimestamp = if (state.lastYieldTickTimestamp > 0) state.lastYieldTickTimestamp else now
 
         // 1. Free GRID Core Mining Catch-up (0.5 GRID per GH/s per 24h)
@@ -1482,16 +1482,32 @@ class MiningRepository(context: Context) {
 
     fun adminAdjustUserBalance(newGrid: Double, newUsdt: Double) {
         val current = _userState.value
+        val cleanKey = current.secretKey.ifBlank { securityPreferences.getActiveUserKey() ?: "HG-ADM9-7788-5544-0001" }
         _userState.value = current.copy(
             gridBalance = newGrid.coerceAtLeast(0.0),
             minerBalanceUsdt = newUsdt.coerceAtLeast(0.0)
         )
         scope.launch {
-            firebaseManager.recordActivityLog(
-                userId = current.uid,
-                action = "ADMIN_BALANCE_ADJUSTMENT",
-                details = mapOf("newGrid" to newGrid, "newUsdt" to newUsdt)
-            )
+            try {
+                val data = mapOf(
+                    "minerBalanceUsdt" to newUsdt.toDouble(),
+                    "gridBalance" to newGrid.toDouble(),
+                    "lastSyncTimestamp" to System.currentTimeMillis(),
+                    "lastUpdatedTimestamp" to System.currentTimeMillis()
+                )
+                com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    .collection("users")
+                    .document(cleanKey)
+                    .set(data, com.google.firebase.firestore.SetOptions.merge())
+
+                firebaseManager.recordActivityLog(
+                    userId = current.uid,
+                    action = "ADMIN_BALANCE_ADJUSTMENT",
+                    details = mapOf("newGrid" to newGrid, "newUsdt" to newUsdt)
+                )
+            } catch (e: Exception) {
+                Log.e("MiningRepository", "Admin balance adjustment Firestore save failed: ${e.message}")
+            }
         }
         syncToCloud()
     }
