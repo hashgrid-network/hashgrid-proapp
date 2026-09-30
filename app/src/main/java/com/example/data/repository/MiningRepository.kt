@@ -358,12 +358,6 @@ class MiningRepository(context: Context) {
     }
 
     suspend fun createNewAccount(): Result<UserMiningState> = withContext(Dispatchers.IO) {
-        val localCount = DeviceIdentifierHelper.getLocalCreatedAccountCount(appContext)
-        if (localCount >= DeviceIdentifierHelper.MAX_ACCOUNTS_PER_DEVICE) {
-            return@withContext Result.failure(Exception("Account Limit Reached: You have reached the maximum limit of 5 accounts allowed on this device. Please log in using an existing Secret Key."))
-        }
-
-        val deviceId = DeviceIdentifierHelper.getHashedDeviceId(appContext)
         val newKey = SecretKeyUtils.generateSecretKey()
         val now = System.currentTimeMillis()
 
@@ -391,13 +385,12 @@ class MiningRepository(context: Context) {
             isAuthenticated = true
         )
 
-        // Validate atomic device registration limit on Firestore
-        val regResult = firebaseManager.registerNewAccountWithDeviceLimit(deviceId, newKey, newState)
-        if (regResult.isFailure) {
-            return@withContext Result.failure(regResult.exceptionOrNull() ?: Exception("Account creation failed."))
+        try {
+            firebaseManager.saveUserUnderSecretKey(newKey, newState)
+            firebaseManager.recordActivityLog(newKey, "ACCOUNT_CREATED")
+        } catch (e: Exception) {
+            Log.w("MiningRepository", "Note on account creation cloud save: ${e.message}")
         }
-
-        DeviceIdentifierHelper.incrementLocalCreatedAccountCount(appContext)
 
         securityPreferences.setSecretKey(newKey)
         securityPreferences.setLoggedIn(true)

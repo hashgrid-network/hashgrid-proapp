@@ -473,72 +473,7 @@ class FirebaseManager(private val context: Context) {
         }
     }
 
-    /**
-     * Atomically validates device account creation limit (max 5) on Firestore devices/{deviceId}
-     * and saves the new user profile if within limits.
-     */
-    suspend fun registerNewAccountWithDeviceLimit(
-        deviceId: String,
-        secretKey: String,
-        userState: UserMiningState
-    ): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val db = firestore ?: FirebaseFirestore.getInstance()
-            val deviceRef = db.collection("devices").document(deviceId)
 
-            // 1. Transaction check & atomic update
-            val creationAllowed = suspendCancellableCoroutine<Boolean> { continuation ->
-                db.runTransaction { transaction ->
-                    val deviceSnapshot = transaction.get(deviceRef)
-                    val currentCount = deviceSnapshot.getLong("accountCount") ?: 0L
-                    val registeredKeys = (deviceSnapshot.get("registeredKeys") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
-
-                    // If key already registered on this device, allow re-sync
-                    if (registeredKeys.contains(secretKey)) {
-                        return@runTransaction true
-                    }
-
-                    if (currentCount >= 5) {
-                        throw Exception("ACCOUNT_LIMIT_EXCEEDED")
-                    }
-
-                    val updatedKeys = registeredKeys + secretKey
-                    val deviceUpdate = hashMapOf<String, Any?>(
-                        "deviceId" to deviceId,
-                        "accountCount" to (currentCount + 1),
-                        "registeredKeys" to updatedKeys,
-                        "lastCreatedTimestamp" to FieldValue.serverTimestamp(),
-                        "platform" to "Android"
-                    )
-                    transaction.set(deviceRef, deviceUpdate, SetOptions.merge())
-                    true
-                }.addOnSuccessListener {
-                    if (continuation.isActive) continuation.resume(true)
-                }.addOnFailureListener { e ->
-                    if (continuation.isActive) continuation.resumeWithException(e)
-                }
-            }
-
-            if (creationAllowed) {
-                // Save user document
-                saveUserUnderSecretKey(secretKey, userState)
-                recordActivityLog(secretKey, "ACCOUNT_CREATED", mapOf("deviceId" to deviceId))
-                Result.success(true)
-            } else {
-                Result.failure(Exception("Account Limit Reached: You have reached the maximum limit of 5 accounts allowed on this device. Please log in using an existing Secret Key."))
-            }
-        } catch (e: Exception) {
-            val isLimit = e.message?.contains("ACCOUNT_LIMIT_EXCEEDED") == true || e.cause?.message?.contains("ACCOUNT_LIMIT_EXCEEDED") == true
-            if (isLimit) {
-                Result.failure(Exception("Account Limit Reached: You have reached the maximum limit of 5 accounts allowed on this device. Please log in using an existing Secret Key."))
-            } else {
-                Log.w(TAG, "Device registration transaction note: ${e.message}")
-                // Fallback safe write if network offline (will sync with Firestore rules/cache)
-                saveUserUnderSecretKey(secretKey, userState)
-                Result.success(true)
-            }
-        }
-    }
 
     /**
      * Records any user activity (both online actions and offline catchup events)
