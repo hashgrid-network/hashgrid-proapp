@@ -119,6 +119,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         viewModel.setUserOnline(false)
+        viewModel.syncMinedTokens()
     }
 
     override fun onDestroy() {

@@ -336,9 +336,17 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun logout() {
-        repository.logout()
-        _currentTab.value = AppNavTab.HOME
-        emitToast("Logged out of HashGrid Pro.")
+        viewModelScope.launch {
+            repository.logout()
+            _currentTab.value = AppNavTab.HOME
+            emitToast("Logged out of HashGrid Pro.")
+        }
+    }
+
+    fun syncMinedTokens() {
+        viewModelScope.launch {
+            repository.syncMinedTokensToFirestore()
+        }
     }
 
     fun restoreAccountWithSecretKey(secretKey: String) {

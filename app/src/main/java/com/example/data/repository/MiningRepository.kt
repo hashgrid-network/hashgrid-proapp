@@ -377,6 +377,34 @@ class MiningRepository(context: Context) {
         }
     }
 
+    suspend fun syncMinedTokensToFirestore(): Boolean = withContext(Dispatchers.IO) {
+        val state = _userState.value
+        if (!state.isAuthenticated || state.secretKey.isBlank()) return@withContext false
+        try {
+            // Save local offline copy first
+            prefs.edit()
+                .putFloat("grid_balance", state.gridBalance.toFloat())
+                .putFloat("miner_balance", state.minerBalanceUsdt.toFloat())
+                .putLong("last_yield_tick", state.lastYieldTickTimestamp)
+                .putLong("free_session_start", state.freeMiningSessionStart)
+                .putLong("free_session_end", state.freeMiningSessionEnd)
+                .putBoolean("free_session_active", state.isFreeMiningActive)
+                .apply()
+
+            if (isCloudHydrated) {
+                firebaseManager.saveUserUnderSecretKey(state.secretKey, state)
+                firebaseManager.syncUserStateToFirestore(state)
+                Log.d("MiningRepository", "Successfully synced mined tokens and sessions to Cloud Firestore.")
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e("MiningRepository", "syncMinedTokensToFirestore error: ${e.message}")
+            false
+        }
+    }
+
     suspend fun createNewAccount(): Result<UserMiningState> = withContext(Dispatchers.IO) {
         val newKey = SecretKeyUtils.generateSecretKey()
         val now = System.currentTimeMillis()
@@ -430,29 +458,29 @@ class MiningRepository(context: Context) {
         Result.success(newState)
     }
 
-    fun logout() {
+    suspend fun logout() = withContext(Dispatchers.IO) {
         val current = _userState.value
         if (current.isAuthenticated && current.secretKey.isNotBlank()) {
-            scope.launch {
-                try {
-                    firebaseManager.saveUserUnderSecretKey(current.secretKey, current)
-                    firebaseManager.syncUserStateToFirestore(current)
-                } catch (e: Throwable) {
-                    Log.e("MiningRepository", "Flush state before logout: ${e.message}")
-                }
+            try {
+                firebaseManager.saveUserUnderSecretKey(current.secretKey, current)
+                firebaseManager.syncUserStateToFirestore(current)
+            } catch (e: Throwable) {
+                Log.e("MiningRepository", "Flush state before logout: ${e.message}")
             }
         }
         isCloudHydrated = false
         securityPreferences.clearSession()
-        _userState.value = UserMiningState(
-            uid = "",
-            secretKey = "",
-            email = "",
-            nodeId = "",
-            isAuthenticated = false,
-            isAdmin = false,
-            role = "user"
-        )
+        withContext(Dispatchers.Main) {
+            _userState.value = UserMiningState(
+                uid = "",
+                secretKey = "",
+                email = "",
+                nodeId = "",
+                isAuthenticated = false,
+                isAdmin = false,
+                role = "user"
+            )
+        }
     }
 
     suspend fun restoreAccountWithSecretKey(secretKey: String): Result<UserMiningState> = withContext(Dispatchers.IO) {
@@ -878,22 +906,32 @@ class MiningRepository(context: Context) {
         val now = System.currentTimeMillis()
         val duration = 24L * 60 * 60 * 1000
         val current = _userState.value
+        val end = now + duration
         _userState.value = current.copy(
             isFreeMiningActive = true,
             freeMiningSessionStart = now,
-            freeMiningSessionEnd = now + duration
+            freeMiningSessionEnd = end
         )
         scope.launch {
-            firebaseManager.recordActivityLog(
-                userId = current.uid,
-                action = "MINING_START",
-                details = mapOf(
-                    "hashrateGh" to current.aggregateFreeHashrateGh,
-                    "timestamp" to now,
-                    "startTime" to now,
-                    "endTime" to (now + duration)
+            try {
+                val updated = _userState.value
+                if (updated.secretKey.isNotBlank()) {
+                    firebaseManager.saveUserUnderSecretKey(updated.secretKey, updated)
+                    firebaseManager.syncUserStateToFirestore(updated)
+                }
+                firebaseManager.recordActivityLog(
+                    userId = current.uid,
+                    action = "MINING_START",
+                    details = mapOf(
+                        "hashrateGh" to current.aggregateFreeHashrateGh,
+                        "timestamp" to now,
+                        "startTime" to now,
+                        "endTime" to end
+                    )
                 )
-            )
+            } catch (e: Exception) {
+                Log.e("MiningRepository", "startFreeMiningSession immediate cloud save failed: ${e.message}")
+            }
         }
         syncToCloud()
     }
