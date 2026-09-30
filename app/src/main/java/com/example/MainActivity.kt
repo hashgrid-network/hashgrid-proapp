@@ -278,7 +278,7 @@ fun MainApp(
             ) { tab ->
                 when (tab) {
                     AppNavTab.HOME -> HomeScreen(
-                        userState = userState,
+                        viewModel = viewModel,
                         gridPriceUsd = gridPriceUsd,
                         onNavigateToTab = { viewModel.selectTab(it) },
                         onOpenDeposit = { viewModel.showDepositDialog.value = true },

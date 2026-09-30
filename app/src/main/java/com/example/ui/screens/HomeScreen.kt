@@ -13,6 +13,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,13 +29,13 @@ import com.example.data.model.RigStatus
 import com.example.data.model.TransactionType
 import com.example.data.model.UserMiningState
 import com.example.ui.AppNavTab
-import com.example.ui.components.GlassCard
-import com.example.ui.components.GlowingBorderCard
+import com.example.ui.MiningViewModel
+import com.example.ui.components.*
 import com.example.ui.theme.*
 
 @Composable
 fun HomeScreen(
-    userState: UserMiningState,
+    viewModel: MiningViewModel,
     gridPriceUsd: Double = 0.01,
     onNavigateToTab: (AppNavTab) -> Unit,
     onOpenDeposit: () -> Unit,
@@ -44,6 +46,11 @@ fun HomeScreen(
     onGridBalanceClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val minerBalance by viewModel.minerBalance.collectAsState()
+    val gridBalance by viewModel.gridBalance.collectAsState()
+    val isMiningActive by viewModel.isMiningActive.collectAsState()
+    val userState by viewModel.userState.collectAsState()
+    
     val context = LocalContext.current
     LazyColumn(
         modifier = modifier

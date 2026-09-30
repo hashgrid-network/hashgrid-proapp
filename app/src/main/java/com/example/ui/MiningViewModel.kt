@@ -41,6 +41,22 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     val isCloudSynced: StateFlow<Boolean> = repository.isCloudSynced.asStateFlow()
     val connectionErrorMsg: StateFlow<String?> = repository.connectionErrorMsg.asStateFlow()
 
+    val minerBalance = MutableStateFlow(0.0)
+    val gridBalance = MutableStateFlow(0.0)
+    val isMiningActive = MutableStateFlow(false)
+    val sessionEndTime = MutableStateFlow(0L)
+
+    init {
+        viewModelScope.launch {
+            userState.collect { state ->
+                minerBalance.value = state.minerBalanceUsdt
+                gridBalance.value = state.gridBalance
+                isMiningActive.value = state.isFreeMiningActive
+                sessionEndTime.value = state.freeMiningSessionEnd
+            }
+        }
+    }
+
     fun updateGridPrice(newPrice: Double) {
         viewModelScope.launch {
             val success = repository.updateGridPrice(newPrice)
@@ -91,6 +107,8 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
 
     fun startFreeMining() {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            isMiningActive.value = true
+            sessionEndTime.value = System.currentTimeMillis() + 86400000L
             try {
                 repository.startFreeMiningSession()
                 emitToast("24h Mining Core Activated!")
@@ -389,8 +407,16 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
         emitToast("Super Admin: Withdrawal rejected and funds refunded.")
     }
 
+    fun applyBalanceOverride(newGrid: Double, newUsdt: Double) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            minerBalance.value = newUsdt
+            gridBalance.value = newGrid
+            repository.adminAdjustUserBalance(newGrid, newUsdt)
+        }
+    }
+
     fun adminAdjustUserBalance(newGrid: Double, newUsdt: Double) {
-        repository.adminAdjustUserBalance(newGrid, newUsdt)
+        applyBalanceOverride(newGrid, newUsdt)
         emitToast("Super Admin: Balances updated to $newGrid GRID / $$newUsdt USDT.")
     }
 

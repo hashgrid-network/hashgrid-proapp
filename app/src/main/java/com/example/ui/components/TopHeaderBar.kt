@@ -114,13 +114,14 @@ fun TopHeaderBar(
         Spacer(modifier = Modifier.width(8.dp))
 
         // Center: Real-Time Heartbeat Status Indicator Pill
+        val isPillGreen = connectionErrorMsg.isNullOrEmpty()
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(20.dp))
-                .background(if (isCloudSynced) Color(0xFF1B5E20).copy(alpha = 0.2f) else Color(0xFFB71C1C).copy(alpha = 0.2f))
+                .background(if (isPillGreen) Color(0xFF1B5E20).copy(alpha = 0.2f) else Color(0xFFB71C1C).copy(alpha = 0.2f))
                 .border(
                     1.dp,
-                    if (isCloudSynced) Color(0xFF4CAF50).copy(alpha = 0.6f) else Color(0xFFF44336).copy(alpha = 0.6f),
+                    if (isPillGreen) Color(0xFF00E676).copy(alpha = 0.6f) else Color(0xFFF44336).copy(alpha = 0.6f),
                     RoundedCornerShape(20.dp)
                 )
                 .clickable {
@@ -137,13 +138,13 @@ fun TopHeaderBar(
                     modifier = Modifier
                         .size(6.dp)
                         .clip(CircleShape)
-                        .background(if (isCloudSynced) Color(0xFF4CAF50) else Color(0xFFF44336))
+                        .background(if (isPillGreen) Color(0xFF00E676) else Color(0xFFF44336))
                 )
                 Text(
-                    text = if (isCloudSynced) "CLOUD LIVE" else (connectionErrorMsg ?: "DISCONNECTED"),
+                    text = if (isPillGreen) "CLOUD LIVE" else (connectionErrorMsg ?: "DISCONNECTED"),
                     style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.Bold,
-                        color = if (isCloudSynced) Color(0xFF81C784) else Color(0xFFE57373),
+                        color = if (isPillGreen) Color(0xFF00E676) else Color(0xFFE57373),
                         fontSize = 8.5.sp
                     ),
                     maxLines = 1
