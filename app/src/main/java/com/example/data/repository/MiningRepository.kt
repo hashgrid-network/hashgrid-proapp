@@ -472,21 +472,7 @@ class MiningRepository(context: Context) {
                 referralCount = 150,
                 activeReferredMiners = 95,
                 referralCode = "HG-ADM01",
-                userRigs = listOf(
-                    UserRig(
-                        id = "rig-titan-adm-01",
-                        catalogId = "titan_enterprise_node",
-                        name = "Titan Enterprise Node #001",
-                        priceUsdt = 500.0,
-                        hashrateGh = 180.0,
-                        purchaseTimestamp = now,
-                        durationDays = 200,
-                        status = RigStatus.ACTIVE,
-                        totalReceivedUsdt = 0.0,
-                        thisMonthEarnedUsdt = 0.0,
-                        lastYieldCalculatedTimestamp = now
-                    )
-                ),
+                userRigs = emptyList(),
                 transactions = listOf(
                     TransactionItem(
                         id = "tx-admin-genesis",
@@ -893,6 +879,41 @@ class MiningRepository(context: Context) {
 
         scope.launch {
             if (current.secretKey.isNotBlank()) {
+                try {
+                    val newRigMap = mapOf(
+                        "nodeId" to newRig.id,
+                        "nodeName" to newRig.name,
+                        "costUsdt" to newRig.priceUsdt,
+                        "hashrateGh" to newRig.hashrateGh,
+                        "purchaseTimestamp" to newRig.purchaseTimestamp,
+                        "totalDays" to newRig.durationDays,
+                        "daysRemaining" to newRig.daysRemaining(),
+                        "receivedUsdt" to newRig.totalReceivedUsdt,
+                        "status" to newRig.status.name,
+                        "catalogId" to newRig.catalogId,
+                        "thisMonthEarnedUsdt" to newRig.thisMonthEarnedUsdt,
+                        "lastYieldCalculatedTimestamp" to newRig.lastYieldCalculatedTimestamp,
+                        "expiryTimestamp" to newRig.expiryTimestamp,
+                        // Alias fields for backwards compatibility
+                        "rigId" to newRig.id,
+                        "name" to newRig.name,
+                        "priceUsdt" to newRig.priceUsdt,
+                        "hashrate" to newRig.hashrateGh,
+                        "durationDays" to newRig.durationDays,
+                        "totalReceivedUsdt" to newRig.totalReceivedUsdt,
+                        "startTimestamp" to newRig.purchaseTimestamp
+                    )
+                    com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                        .collection("users")
+                        .document(current.secretKey)
+                        .update(
+                            "hardwareNodes", com.google.firebase.firestore.FieldValue.arrayUnion(newRigMap),
+                            "minerBalanceUsdt", com.google.firebase.firestore.FieldValue.increment(-catalogItem.priceUsdt),
+                            "dailySpentUsdt", com.google.firebase.firestore.FieldValue.increment(catalogItem.priceUsdt)
+                        )
+                } catch (e: Exception) {
+                    Log.e("MiningRepository", "Direct Firestore update failed: ${e.message}", e)
+                }
                 firebaseManager.saveUserUnderSecretKey(current.secretKey, updatedState)
             }
             firebaseManager.recordPlanActivation(current.uid, newRig, newBalance)
