@@ -61,6 +61,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        try {
+            if (com.google.firebase.FirebaseApp.getApps(this).isEmpty()) {
+                val options = com.google.firebase.FirebaseOptions.Builder()
+                    .setProjectId("hashgrid-pro")
+                    .setApplicationId("1:713000000000:android:hashgridpro123456") // fallback app id
+                    .setApiKey("AIzaSyDummyKeyForHashGridProTestingOnly999")
+                    .build()
+                com.google.firebase.FirebaseApp.initializeApp(this, options)
+                Log.i("FIREBASE_INIT", "Programmatic fallback initialized successfully")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("FIREBASE_INIT", "Initialization fallback error", e)
+        }
+
+        try {
+            val settings = com.google.firebase.firestore.FirebaseFirestoreSettings.Builder()
+                .setPersistenceEnabled(true)
+                .build()
+            com.google.firebase.firestore.FirebaseFirestore.getInstance().firestoreSettings = settings
+        } catch (e: Exception) {
+            // already set
+        }
+
         super.onCreate(savedInstanceState)
 
         // Safe FLAG_SECURE application: Only enable in Release mode (!BuildConfig.DEBUG)
