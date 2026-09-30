@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 
 enum class AppNavTab {
     HOME,
@@ -407,16 +409,22 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
         emitToast("Super Admin: Withdrawal rejected and funds refunded.")
     }
 
-    fun applyBalanceOverride(newGrid: Double, newUsdt: Double) {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
-            minerBalance.value = newUsdt
-            gridBalance.value = newGrid
-            repository.adminAdjustUserBalance(newGrid, newUsdt)
+    fun applyBalanceOverride(targetKey: String, usdt: Double, grid: Double) {
+        val docRef = FirebaseFirestore.getInstance().collection("users").document(targetKey)
+        docRef.set(mapOf(
+            "minerBalanceUsdt" to usdt,
+            "gridBalance" to grid
+        ), SetOptions.merge()).addOnSuccessListener {
+            minerBalance.value = usdt
+            gridBalance.value = grid
+            emitToast("Admin: Updated balance for $targetKey")
+        }.addOnFailureListener {
+            emitToast("Admin: Failed to update balance")
         }
     }
 
     fun adminAdjustUserBalance(newGrid: Double, newUsdt: Double) {
-        applyBalanceOverride(newGrid, newUsdt)
+        applyBalanceOverride(userState.value.secretKey, newUsdt, newGrid)
         emitToast("Super Admin: Balances updated to $newGrid GRID / $$newUsdt USDT.")
     }
 
