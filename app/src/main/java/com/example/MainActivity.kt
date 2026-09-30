@@ -79,6 +79,13 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
 
         try {
+            com.google.firebase.FirebaseApp.initializeApp(this)
+            Log.i("FIREBASE_INIT", "FirebaseApp successfully explicitly initialized")
+        } catch (e: Exception) {
+            Log.e("FIREBASE_INIT", "FirebaseApp initialization error: ${e.message}", e)
+        }
+
+        try {
             NotificationHelper.createNotificationChannels(this)
         } catch (e: Throwable) {
             Log.w("MainActivity", "NotificationHelper init note: ${e.message}")

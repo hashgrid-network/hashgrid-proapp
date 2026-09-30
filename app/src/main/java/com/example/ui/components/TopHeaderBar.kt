@@ -21,6 +21,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CryptoTickerPrice
 import com.example.ui.theme.*
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.clickable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 
 @Composable
 fun TopHeaderBar(
@@ -32,6 +37,23 @@ fun TopHeaderBar(
     tickers: List<CryptoTickerPrice> = emptyList(),
     modifier: Modifier = Modifier
 ) {
+    var showExplanationDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    if (showExplanationDialog) {
+        AlertDialog(
+            onDismissRequest = { showExplanationDialog = false },
+            title = { Text(text = "Cloud Diagnostics", color = TextGold, fontWeight = FontWeight.Bold) },
+            text = { Text(text = connectionErrorMsg ?: "No connection errors have been logged yet. Active status is fully stable.", color = Color.White) },
+            confirmButton = {
+                TextButton(onClick = { showExplanationDialog = false }) {
+                    Text("OK", color = TextGold, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = DarkNavySurface,
+            tonalElevation = 6.dp
+        )
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -101,6 +123,9 @@ fun TopHeaderBar(
                     if (isCloudSynced) Color(0xFF4CAF50).copy(alpha = 0.6f) else Color(0xFFF44336).copy(alpha = 0.6f),
                     RoundedCornerShape(20.dp)
                 )
+                .clickable {
+                    showExplanationDialog = true
+                }
                 .padding(horizontal = 8.dp, vertical = 4.dp)
                 .testTag("cloud_heartbeat_pill")
         ) {

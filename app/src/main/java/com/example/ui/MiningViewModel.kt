@@ -95,8 +95,9 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
                 repository.startFreeMiningSession()
                 emitToast("24h Mining Core Activated!")
             } catch (e: Exception) {
-                Log.e("MiningViewModel", "Start mining session exception: ${e.message}", e)
-                emitToast("Offline: Mining will sync once connected")
+                val fullError = "${e.javaClass.simpleName}: ${e.localizedMessage ?: e.message}"
+                emitToast(fullError)
+                Log.e("FIRESTORE_WRITE_ERR", "Write failed", e)
             }
         }
     }
