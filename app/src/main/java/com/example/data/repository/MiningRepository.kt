@@ -405,12 +405,20 @@ class MiningRepository(context: Context) {
             isAuthenticated = true
         )
 
-        try {
+        val success = try {
             isCloudHydrated = true
-            firebaseManager.saveUserUnderSecretKey(newKey, newState)
-            firebaseManager.recordActivityLog(newKey, "ACCOUNT_CREATED")
+            val saved = firebaseManager.saveUserUnderSecretKey(newKey, newState)
+            if (saved) {
+                firebaseManager.recordActivityLog(newKey, "ACCOUNT_CREATED")
+            }
+            saved
         } catch (e: Exception) {
             Log.w("MiningRepository", "Note on account creation cloud save: ${e.message}")
+            false
+        }
+
+        if (!success) {
+            return@withContext Result.failure(Exception("Failed to register your secure Web3 mining profile to the Firestore cloud. Please check your internet connection and try again."))
         }
 
         securityPreferences.setActiveUserKey(newKey)

@@ -583,30 +583,32 @@ class FirebaseManager(private val context: Context) {
                 return@withContext Result.failure(Exception("No account found matching Secret Key: $cleanKey"))
             }
 
-            val gridBalance = snapshot.getDouble("gridBalance") ?: 0.0
-            val usdtBalance = snapshot.getDouble("usdtBalance") ?: snapshot.getDouble("minerBalanceUsdt") ?: 0.0
+            val gridBalance = (snapshot.get("gridBalance") as? Number)?.toDouble() ?: 0.0
+            val usdtBalance = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble() 
+                ?: (snapshot.get("usdtBalance") as? Number)?.toDouble() 
+                ?: 0.0
             val isMiningActive = snapshot.getBoolean("isMiningActive") ?: snapshot.getBoolean("isFreeMiningActive") ?: false
-            val sessionStart = snapshot.getLong("miningStartTime") ?: snapshot.getLong("freeMiningSessionStart") ?: 0L
-            val sessionEnd = snapshot.getLong("miningEndTime") ?: snapshot.getLong("freeMiningSessionEnd") ?: 0L
+            val sessionStart = (snapshot.get("miningStartTime") as? Number)?.toLong() ?: (snapshot.get("freeMiningSessionStart") as? Number)?.toLong() ?: 0L
+            val sessionEnd = (snapshot.get("miningEndTime") as? Number)?.toLong() ?: (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong() ?: 0L
             val serverTimestampObj = snapshot.get("lastSyncServerTimestamp") as? Timestamp
             val lastYieldTick = serverTimestampObj?.toDate()?.time
-                ?: snapshot.getLong("lastYieldTimestamp")
-                ?: snapshot.getLong("lastYieldTickTimestamp")
-                ?: snapshot.getLong("lastSyncTimestamp")
-                ?: snapshot.getLong("lastUpdatedTimestamp")
+                ?: (snapshot.get("lastYieldTimestamp") as? Number)?.toLong()
+                ?: (snapshot.get("lastYieldTickTimestamp") as? Number)?.toLong()
+                ?: (snapshot.get("lastSyncTimestamp") as? Number)?.toLong()
+                ?: (snapshot.get("lastUpdatedTimestamp") as? Number)?.toLong()
                 ?: System.currentTimeMillis()
             val referralCode = snapshot.getString("referralCode") ?: "HG-${cleanKey.takeLast(4)}"
             val referredBy = snapshot.getString("referredBy")
-            val baseFreeHashrate = snapshot.getDouble("baseFreeHashrateGh") ?: 1.0
-            val referralCount = (snapshot.getLong("referralCount") ?: 3L).toInt()
-            val activeReferredMiners = (snapshot.getLong("activeReferredMiners") ?: 2L).toInt()
-            val tempBoostGh = snapshot.getDouble("temporaryBoostHashrateGh") ?: 0.0
-            val tempBoostExpiry = snapshot.getLong("temporaryBoostExpiry") ?: 0L
-            val lastDailySpin = snapshot.getLong("lastDailySpinTimestamp") ?: 0L
-            val teamCount = snapshot.getLong("teamCount") ?: snapshot.getLong("referralCount") ?: 0L
-            val teamEarningsUsdt = snapshot.getDouble("teamEarningsUsdt") ?: 0.0
-            val totalHashrateBoostGh = snapshot.getDouble("totalHashrateBoostGh") ?: 0.0
-            val createdAt = snapshot.getLong("createdAt") ?: System.currentTimeMillis()
+            val baseFreeHashrate = (snapshot.get("baseFreeHashrateGh") as? Number)?.toDouble() ?: 1.0
+            val referralCount = ((snapshot.get("referralCount") as? Number)?.toLong() ?: 3L).toInt()
+            val activeReferredMiners = ((snapshot.get("activeReferredMiners") as? Number)?.toLong() ?: 2L).toInt()
+            val tempBoostGh = (snapshot.get("temporaryBoostHashrateGh") as? Number)?.toDouble() ?: 0.0
+            val tempBoostExpiry = (snapshot.get("temporaryBoostExpiry") as? Number)?.toLong() ?: 0L
+            val lastDailySpin = (snapshot.get("lastDailySpinTimestamp") as? Number)?.toLong() ?: 0L
+            val teamCount = (snapshot.get("teamCount") as? Number)?.toLong() ?: referralCount.toLong()
+            val teamEarningsUsdt = (snapshot.get("teamEarningsUsdt") as? Number)?.toDouble() ?: 0.0
+            val totalHashrateBoostGh = (snapshot.get("totalHashrateBoostGh") as? Number)?.toDouble() ?: 0.0
+            val createdAt = (snapshot.get("createdAt") as? Number)?.toLong() ?: System.currentTimeMillis()
             val isMasterAdmin = SecretKeyUtils.isMasterAdminKey(cleanKey) || (snapshot.getBoolean("isAdmin") ?: false)
             val userRole = if (isMasterAdmin) "superadmin" else (snapshot.getString("role") ?: "user")
 
