@@ -47,40 +47,11 @@ class MiningRepository(context: Context) {
 
     private var lastYieldTickTime = System.currentTimeMillis()
     private var lastCloudSyncTime = System.currentTimeMillis()
+    private var isCloudHydrated = false
 
     init {
         startBackgroundEngine()
         attachSystemSettingsListener()
-        val current = _userState.value
-        if (current.isAuthenticated && current.secretKey.isNotBlank()) {
-            scope.launch {
-                hydrateFromFirestore(current.secretKey)
-            }
-        }
-    }
-
-    private suspend fun hydrateFromFirestore(secretKey: String) {
-        try {
-            val res = firebaseManager.restoreUserBySecretKey(secretKey)
-            val now = System.currentTimeMillis()
-            if (res.isSuccess && res.getOrNull() != null) {
-                val restored = res.getOrThrow()!!
-                val caughtUpState = applyOfflineCatchUpYield(restored, now)
-                _userState.value = caughtUpState.copy(
-                    isKeyBackedUp = securityPreferences.isSecretKeyBackedUp(),
-                    isPinConfigured = securityPreferences.isPinSet(),
-                    isBiometricEnabled = securityPreferences.isBiometricEnabled(),
-                    isAuthenticated = true
-                )
-                firebaseManager.saveUserUnderSecretKey(secretKey, _userState.value)
-                Log.d("MiningRepository", "Successfully hydrated and caught up user state from Firestore.")
-            } else {
-                // Initialize in Firestore if not present
-                firebaseManager.saveUserUnderSecretKey(secretKey, _userState.value)
-            }
-        } catch (e: Exception) {
-            Log.w("MiningRepository", "Hydration from Firestore note: ${e.message}")
-        }
     }
 
     /**
@@ -254,17 +225,45 @@ class MiningRepository(context: Context) {
                         val now = System.currentTimeMillis()
                         val caughtUp = applyOfflineCatchUpYield(cloudState, now)
                         _userState.value = caughtUp.copy(
+                            isKeyBackedUp = securityPreferences.isSecretKeyBackedUp(),
                             isPinConfigured = securityPreferences.isPinSet(),
                             isBiometricEnabled = securityPreferences.isBiometricEnabled(),
-                            isAppLocked = securityPreferences.isPinSet()
+                            isAppLocked = securityPreferences.isPinSet(),
+                            isAuthenticated = true
                         )
+                        isCloudHydrated = true
+                        Log.d("MiningRepository", "Successfully hydrated and caught up user state from Firestore at startup.")
+                        
+                        // Save offline local cache of the hydrated state
+                        prefs.edit()
+                            .putFloat("grid_balance", _userState.value.gridBalance.toFloat())
+                            .putFloat("miner_balance", _userState.value.minerBalanceUsdt.toFloat())
+                            .putLong("last_yield_tick", _userState.value.lastYieldTickTimestamp)
+                            .putLong("free_session_start", _userState.value.freeMiningSessionStart)
+                            .putLong("free_session_end", _userState.value.freeMiningSessionEnd)
+                            .putBoolean("free_session_active", _userState.value.isFreeMiningActive)
+                            .apply()
+                    } else {
+                        // User key not found on cloud, but already logged in locally.
+                        // We mark as hydrated to allow saving local work.
+                        isCloudHydrated = true
                     }
                 } catch (e: Exception) {
-                    Log.w("MiningRepository", "Startup cloud hydrate note: ${e.message}")
+                    Log.w("MiningRepository", "Startup cloud hydrate error: ${e.message}")
+                    // On network failure, we check if they have cached data from previous runs to prevent zero overwrite.
+                    val savedGrid = prefs.getFloat("grid_balance", -1f)
+                    if (savedGrid >= 0) {
+                        isCloudHydrated = true
+                    }
                 }
+            } else {
+                // No logged-in user, fully hydrated by default
+                isCloudHydrated = true
             }
-            // Initial sync to Firestore
+
+            // Safe sync initial state if hydrated
             syncToCloud()
+
             while (isActive) {
                 delay(1000)
                 tickSecond()
@@ -345,6 +344,12 @@ class MiningRepository(context: Context) {
             .putBoolean("free_session_active", state.isFreeMiningActive)
             .apply()
 
+        // Prevent race condition: Only sync to Firestore if latest state is already hydrated from cloud
+        if (!isCloudHydrated) {
+            Log.d("MiningRepository", "Skipping syncToCloud Firestore push: Waiting for cloud hydration.")
+            return
+        }
+
         scope.launch {
             try {
                 if (state.secretKey.isNotBlank()) {
@@ -386,6 +391,7 @@ class MiningRepository(context: Context) {
         )
 
         try {
+            isCloudHydrated = true
             firebaseManager.saveUserUnderSecretKey(newKey, newState)
             firebaseManager.recordActivityLog(newKey, "ACCOUNT_CREATED")
         } catch (e: Exception) {
@@ -413,6 +419,7 @@ class MiningRepository(context: Context) {
                 }
             }
         }
+        isCloudHydrated = false
         securityPreferences.clearSession()
         _userState.value = UserMiningState(
             uid = "",
@@ -502,36 +509,16 @@ class MiningRepository(context: Context) {
                 role = "superadmin",
                 isAuthenticated = true
             )
+            isCloudHydrated = true
             firebaseManager.saveUserUnderSecretKey(cleanKey, adminState)
             adminState
         } else {
-            val newUserState = UserMiningState(
-                uid = cleanKey,
-                secretKey = cleanKey,
-                email = "miner_${cleanKey.takeLast(4).lowercase()}@hashgrid.pro",
-                nodeId = "NODE-WEB3-#${cleanKey.takeLast(4)}",
-                minerBalanceUsdt = 0.0,
-                gridBalance = 0.0,
-                baseFreeHashrateGh = 2.0,
-                referralCount = 0,
-                activeReferredMiners = 0,
-                referralCode = "HG-${cleanKey.takeLast(4)}",
-                userRigs = emptyList(),
-                transactions = emptyList(),
-                isKeyBackedUp = true,
-                isPinConfigured = securityPreferences.isPinSet(),
-                isBiometricEnabled = securityPreferences.isBiometricEnabled(),
-                isAppLocked = false,
-                lastYieldTickTimestamp = now,
-                createdAt = now,
-                isAdmin = false,
-                role = "user",
-                isAuthenticated = true
-            )
-            firebaseManager.saveUserUnderSecretKey(cleanKey, newUserState)
-            newUserState
+            // STRICT FETCH-FIRST FAILURE:
+            // Do NOT generate a fresh 0-balance account. If the key is not found, display an error.
+            return@withContext Result.failure(Exception("No registered account found matching this Secret Key. Please check the spelling or create a new account instead."))
         }
 
+        isCloudHydrated = true
         securityPreferences.setSecretKey(cleanKey)
         securityPreferences.setLoggedIn(true)
         securityPreferences.setSecretKeyBackedUp(true)
