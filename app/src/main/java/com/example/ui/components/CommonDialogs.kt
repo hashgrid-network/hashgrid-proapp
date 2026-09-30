@@ -339,11 +339,12 @@ fun WithdrawalDialog(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
-                                Text("WITHDRAWABLE MINER BALANCE", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.sp))
+                                Text("AVAILABLE BALANCE: WITHDRAWABLE FROM RIGS & REFERRALS", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 7.5.sp))
                                 Text(
                                     "$${String.format("%.2f", currentBalanceUsdt)} USDT",
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold, color = GoldLight)
                                 )
+                                Text("✓ Withdrawable (Rigs & Referrals)", style = MaterialTheme.typography.labelSmall.copy(color = TextEmerald, fontSize = 8.5.sp, fontWeight = FontWeight.Bold))
                             }
                             Button(
                                 onClick = { amountInput = String.format("%.2f", currentBalanceUsdt) },
@@ -471,10 +472,9 @@ fun WithdrawalDialog(
                     Button(
                         onClick = {
                             val amt = amountInput.toDoubleOrNull() ?: 0.0
-                            if (amt < 10.0) {
-                                errorMessage = "Minimum withdrawal is 10.00 USDT."
-                            } else if (amt > currentBalanceUsdt) {
-                                errorMessage = "Insufficient Miner Balance."
+                            if (amt < 10.0 || amt > currentBalanceUsdt) {
+                                errorMessage = "Insufficient withdrawable USDT balance."
+                                onConfirmWithdraw(amt, addressInput, selectedNetwork)
                             } else if (addressInput.length < 10) {
                                 errorMessage = "Please enter a valid wallet address."
                             } else {
@@ -890,3 +890,56 @@ fun TaskPolicyDialog(onDismiss: () -> Unit) {
         }
     }
 }
+
+@Composable
+fun GridPreLaunchLockedDialog(onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        GlassCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            borderColor = CyanAccent
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "🔒 GRID Token Pre-Launch Notice",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = CyanAccent)
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "Free mined GRID tokens are currently locked during the official testnet / pre-launch phase. Unlocking will occur at the Token Generation Event (TGE) upon DEX/CEX mainnet listing.\n\nOnly USDT profits earned through Active Hardware Nodes and 7% Downline Referral Commissions are instantly withdrawable.",
+                    style = MaterialTheme.typography.bodyMedium.copy(color = TextSecondary, lineHeight = 20.sp)
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().testTag("grid_locked_dialog_ok_btn"),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Got it", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
+                }
+            }
+        }
+    }
+}
+

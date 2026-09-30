@@ -10,12 +10,25 @@ import android.widget.Toast
 object ReferralConstants {
     const val REFERRAL_BASE_URL = "https://hashgrid.online/?ref="
 
+    fun getShortReferralCode(referralCode: String): String {
+        val clean = referralCode.trim().uppercase()
+        if (clean.length <= 10) return clean
+        val parts = clean.split("-")
+        return if (parts.size >= 2) {
+            "HG-${parts.last()}"
+        } else {
+            "HG-${clean.takeLast(4)}"
+        }
+    }
+
     fun getReferralUrl(referralCode: String): String {
-        return "$REFERRAL_BASE_URL$referralCode"
+        val shortCode = getShortReferralCode(referralCode)
+        return "$REFERRAL_BASE_URL$shortCode"
     }
 
     fun getReferralPreview(referralCode: String): String {
-        return "hashgrid.online/?ref=$referralCode"
+        val shortCode = getShortReferralCode(referralCode)
+        return "hashgrid.online/?ref=$shortCode"
     }
 
     fun getShareMessage(referralCode: String): String {

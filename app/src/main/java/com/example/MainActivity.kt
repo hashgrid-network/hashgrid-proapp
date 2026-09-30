@@ -162,6 +162,7 @@ fun MainApp(
     val showVideoPromo by viewModel.showVideoPromoDialog.collectAsStateWithLifecycle()
     val showHowItWorks by viewModel.showHowItWorksDialog.collectAsStateWithLifecycle()
     val showTaskPolicy by viewModel.showTaskPolicyDialog.collectAsStateWithLifecycle()
+    val showGridLocked by viewModel.showGridLockedDialog.collectAsStateWithLifecycle()
 
     // Security & Web3 States
     val showSecretKeyBackup by viewModel.showSecretKeyBackupModal.collectAsStateWithLifecycle()
@@ -249,7 +250,8 @@ fun MainApp(
                         onOpenWithdraw = { viewModel.showWithdrawDialog.value = true },
                         onOpenLuckyWheel = { viewModel.showLuckyWheelDialog.value = true },
                         onOpenCalculator = { viewModel.showCalculatorDialog.value = true },
-                        onOpenHowItWorks = { viewModel.showHowItWorksDialog.value = true }
+                        onOpenHowItWorks = { viewModel.showHowItWorksDialog.value = true },
+                        onGridBalanceClick = { viewModel.showGridLockedDialog.value = true }
                     )
                     AppNavTab.RIGS_STORE -> RigsStoreScreen(
                         userState = userState,
@@ -291,7 +293,8 @@ fun MainApp(
                         onToggleBiometric = { viewModel.toggleBiometric(it) },
                         onLockAppNow = { viewModel.lockApp() },
                         onOpenAdminControlHub = { viewModel.showAdminControlHubDialog.value = true },
-                        onLogout = { viewModel.logout() }
+                        onLogout = { viewModel.logout() },
+                        onGridBalanceClick = { viewModel.showGridLockedDialog.value = true }
                     )
                 }
             }
@@ -362,6 +365,12 @@ fun MainApp(
     if (showTaskPolicy) {
         TaskPolicyDialog(
             onDismiss = { viewModel.showTaskPolicyDialog.value = false }
+        )
+    }
+
+    if (showGridLocked) {
+        GridPreLaunchLockedDialog(
+            onDismiss = { viewModel.showGridLockedDialog.value = false }
         )
     }
 

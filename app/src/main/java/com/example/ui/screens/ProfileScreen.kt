@@ -53,6 +53,7 @@ fun ProfileScreen(
     onLockAppNow: () -> Unit = {},
     onOpenAdminControlHub: () -> Unit = {},
     onLogout: () -> Unit = {},
+    onGridBalanceClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var customPriceInput by remember(currentGridPrice) { mutableStateOf(String.format("%.2f", currentGridPrice)) }
@@ -370,15 +371,18 @@ fun ProfileScreen(
                                 "$${String.format("%.2f", userState.minerBalanceUsdt)} USDT",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold, color = GoldLight)
                             )
-                            Text("Withdrawable", style = MaterialTheme.typography.labelSmall.copy(color = TextEmerald, fontSize = 8.5.sp))
+                            Text("✓ Withdrawable (Rigs & Referrals)", style = MaterialTheme.typography.labelSmall.copy(color = TextEmerald, fontSize = 8.5.sp, fontWeight = FontWeight.Bold))
                         }
-                        Column(horizontalAlignment = Alignment.End) {
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            modifier = Modifier.clickable { onGridBalanceClick() }
+                        ) {
                             Text("GRID Balance", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
                             Text(
                                 "${String.format("%,.3f", userState.gridBalance)} GRID",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.ExtraBold, color = Color.White)
                             )
-                            Text("≈ $${String.format("%.2f", gridUsdVal)} USD", style = MaterialTheme.typography.labelSmall.copy(color = TextGold, fontSize = 8.5.sp))
+                            Text("🔒 Locked • Unlocks at TGE Listing", style = MaterialTheme.typography.labelSmall.copy(color = TextGold, fontSize = 8.5.sp, fontWeight = FontWeight.Medium))
                         }
                     }
 

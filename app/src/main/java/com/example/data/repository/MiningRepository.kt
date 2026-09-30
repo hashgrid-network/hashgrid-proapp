@@ -947,11 +947,8 @@ class MiningRepository(context: Context) {
 
     fun requestWithdrawal(amountUsdt: Double, address: String, network: String): Result<TransactionItem> {
         val current = _userState.value
-        if (amountUsdt < 10.0) {
-            return Result.failure(Exception("Minimum withdrawal threshold is 10.00 USDT."))
-        }
-        if (current.minerBalanceUsdt < amountUsdt) {
-            return Result.failure(Exception("Insufficient Miner Balance."))
+        if (amountUsdt < 10.0 || current.minerBalanceUsdt < amountUsdt) {
+            return Result.failure(Exception("Insufficient withdrawable USDT balance."))
         }
         if (address.isBlank() || address.length < 10) {
             return Result.failure(Exception("Please enter a valid $network wallet address."))

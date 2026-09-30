@@ -64,6 +64,7 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     val showVideoPromoDialog = MutableStateFlow(false)
     val showHowItWorksDialog = MutableStateFlow(false)
     val showTaskPolicyDialog = MutableStateFlow(false)
+    val showGridLockedDialog = MutableStateFlow(false)
 
     // Security, Secret Key & Smart Lock States
     val showSecretKeyBackupModal = MutableStateFlow(false)

@@ -41,6 +41,7 @@ fun HomeScreen(
     onOpenLuckyWheel: () -> Unit,
     onOpenCalculator: () -> Unit,
     onOpenHowItWorks: () -> Unit,
+    onGridBalanceClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -183,10 +184,11 @@ fun HomeScreen(
                                 )
                             )
                             Text(
-                                text = "≈ Withdrawable Funds",
+                                text = "✓ Withdrawable (Rigs & Referrals)",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = TextEmerald,
-                                    fontSize = 9.sp
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             )
                         }
@@ -202,7 +204,11 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.width(12.dp))
 
                         // GRID Coin Balance
-                        Column(modifier = Modifier.weight(1.1f)) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1.1f)
+                                .clickable { onGridBalanceClick() }
+                        ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -236,10 +242,11 @@ fun HomeScreen(
                                 )
                             )
                             Text(
-                                text = "≈ $${String.format("%.2f", gridPreLaunchUsdValue)} USD (@ $${String.format("%.2f", gridPriceUsd)})",
+                                text = "🔒 Locked • Unlocks at TGE Listing",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = TextGold,
-                                    fontSize = 9.sp
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Medium
                                 )
                             )
                         }
@@ -534,7 +541,7 @@ fun HomeScreen(
                                 maxLines = 1
                             )
                             Text(
-                                text = "Code: ${userState.referralCode}",
+                                text = "Code: ${com.example.data.security.ReferralConstants.getShortReferralCode(userState.referralCode)}",
                                 style = MaterialTheme.typography.labelSmall.copy(
                                     color = TextGold,
                                     fontWeight = FontWeight.Bold,
