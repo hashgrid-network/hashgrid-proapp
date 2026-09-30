@@ -198,12 +198,14 @@ class FirebaseManager(private val context: Context) {
         try {
             val db = firestore ?: FirebaseFirestore.getInstance()
 
-            // 1. Sync User Document: users/{uid}
+            // 1. Sync User Document: users/{secretKey}
             val userData = hashMapOf(
-                "uid" to state.uid,
+                "uid" to state.secretKey,
+                "secretKey" to state.secretKey,
                 "email" to state.email,
                 "nodeId" to state.nodeId,
                 "minerBalanceUsdt" to state.minerBalanceUsdt,
+                "usdtBalance" to state.minerBalanceUsdt,
                 "gridBalance" to state.gridBalance,
                 "baseFreeHashrateGh" to state.baseFreeHashrateGh,
                 "referralCount" to state.referralCount,
@@ -222,14 +224,14 @@ class FirebaseManager(private val context: Context) {
                 "lastUpdatedTimestamp" to System.currentTimeMillis()
             )
 
-            db.collection("users").document(state.uid)
+            db.collection("users").document(state.secretKey)
                 .set(userData, SetOptions.merge())
 
             // 2. Sync Deployed Rigs: rigs/{rigId}
             state.userRigs.forEach { rig ->
                 val rigData = hashMapOf(
                     "id" to rig.id,
-                    "userId" to state.uid,
+                    "userId" to state.secretKey,
                     "catalogId" to rig.catalogId,
                     "name" to rig.name,
                     "priceUsdt" to rig.priceUsdt,
@@ -248,21 +250,20 @@ class FirebaseManager(private val context: Context) {
 
             // 3. Sync Transactions: transactions/{txId} & users/{userId}/transactions/{txId}
             state.transactions.take(15).forEach { tx ->
-                saveOrUpdateTransaction(state.uid, tx)
+                saveOrUpdateTransaction(state.secretKey, tx)
             }
 
             // 4. Sync Lucky Spins: luckySpins/{id}
             state.spinHistory.take(10).forEach { spin ->
                 val spinData = hashMapOf(
                     "id" to spin.id,
-                    "userId" to state.uid,
+                    "userId" to state.secretKey,
                     "rewardTitle" to spin.rewardTitle,
                     "rewardSubtitle" to spin.rewardSubtitle,
                     "timestamp" to spin.timestamp,
                     "rewardType" to spin.rewardType.name,
                     "value" to spin.value
                 )
-                db.collection("luckySpins").document(spin.id)
                 db.collection("luckySpins").document(spin.id)
                     .set(spinData, SetOptions.merge())
             }
@@ -271,7 +272,7 @@ class FirebaseManager(private val context: Context) {
             state.microTasks.forEach { task ->
                 val taskData = hashMapOf(
                     "id" to task.id,
-                    "userId" to state.uid,
+                    "userId" to state.secretKey,
                     "platform" to task.platform.name,
                     "submittedAt" to task.submittedAt,
                     "initialViewCount" to task.initialViewCount,
