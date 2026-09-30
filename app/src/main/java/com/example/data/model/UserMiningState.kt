@@ -31,6 +31,9 @@ data class UserMiningState(
     // Limits and Referrals
     val referralCode: String = "",
     val referredBy: String? = null,
+    val teamCount: Long = 0L,
+    val teamEarningsUsdt: Double = 0.0,
+    val totalHashrateBoostGh: Double = 0.0,
     val dailySpentUsdt: Double = 0.0,
     val dailySpentResetDate: Long = System.currentTimeMillis(),
     val lastDailySpinTimestamp: Long = 0L,
@@ -56,7 +59,7 @@ data class UserMiningState(
 ) {
     // Referral boost calculation: +0.25 per registration, +0.50 per active miner
     val referralBoostHashrateGh: Double
-        get() = (referralCount * 0.25) + (activeReferredMiners * 0.50)
+        get() = if (totalHashrateBoostGh > 0.0) totalHashrateBoostGh else ((referralCount * 0.25) + (activeReferredMiners * 0.50))
 
     // Free hashrate capped strictly at 10.0 GH/s
     val aggregateFreeHashrateGh: Double

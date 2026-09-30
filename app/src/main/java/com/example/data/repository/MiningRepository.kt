@@ -138,7 +138,7 @@ class MiningRepository(context: Context) {
         val now = System.currentTimeMillis()
 
         val isLoggedIn = securityPreferences.isLoggedIn()
-        var key = securityPreferences.getSecretKey()
+        var key = securityPreferences.getActiveUserKey()
         if (!isLoggedIn || key.isNullOrBlank()) {
             return UserMiningState(
                 uid = "",
@@ -224,6 +224,21 @@ class MiningRepository(context: Context) {
                         val cloudState = res.getOrThrow()!!
                         val now = System.currentTimeMillis()
                         val caughtUp = applyOfflineCatchUpYield(cloudState, now)
+                        val earnedGrid = caughtUp.gridBalance - cloudState.gridBalance
+                        val earnedUsdt = caughtUp.minerBalanceUsdt - cloudState.minerBalanceUsdt
+                        if (earnedGrid > 0.0 || earnedUsdt > 0.0) {
+                            scope.launch {
+                                firebaseManager.recordActivityLog(
+                                    userId = cloudState.secretKey,
+                                    action = "OFFLINE_YIELD_SYNCED",
+                                    details = mapOf(
+                                        "grid" to earnedGrid,
+                                        "usdt" to earnedUsdt,
+                                        "timestamp" to now
+                                    )
+                                )
+                            }
+                        }
                         _userState.value = caughtUp.copy(
                             isKeyBackedUp = securityPreferences.isSecretKeyBackedUp(),
                             isPinConfigured = securityPreferences.isPinSet(),
@@ -398,7 +413,7 @@ class MiningRepository(context: Context) {
             Log.w("MiningRepository", "Note on account creation cloud save: ${e.message}")
         }
 
-        securityPreferences.setSecretKey(newKey)
+        securityPreferences.setActiveUserKey(newKey)
         securityPreferences.setLoggedIn(true)
         securityPreferences.setSecretKeyBackedUp(false)
 
@@ -439,8 +454,50 @@ class MiningRepository(context: Context) {
             return@withContext Result.failure(Exception("Invalid format. Must be HG-XXXX-XXXX-XXXX-XXXX"))
         }
 
-        val res = firebaseManager.restoreUserBySecretKey(cleanKey)
+        var res = firebaseManager.restoreUserBySecretKey(cleanKey)
         val now = System.currentTimeMillis()
+
+        if (res.isFailure || res.getOrNull() == null) {
+            if (isMasterAdmin) {
+                val defaultAdmin = UserMiningState(
+                    uid = cleanKey,
+                    secretKey = cleanKey,
+                    email = "admin@hashgrid.pro",
+                    nodeId = "NODE-SUPERADMIN-#0001",
+                    minerBalanceUsdt = 5000.0,
+                    gridBalance = 10000.0,
+                    baseFreeHashrateGh = 10.0,
+                    referralCount = 150,
+                    activeReferredMiners = 95,
+                    referralCode = "HG-ADM01",
+                    userRigs = emptyList(),
+                    transactions = listOf(
+                        TransactionItem(
+                            id = "tx-admin-genesis",
+                            type = TransactionType.DEPOSIT,
+                            amount = 5000.0,
+                            currency = "USDT",
+                            timestamp = now,
+                            status = TransactionStatus.COMPLETED,
+                            description = "Master SuperAdmin Genesis Protocol Liquidity",
+                            network = "BEP20 (BSC)"
+                        )
+                    ),
+                    isKeyBackedUp = true,
+                    isPinConfigured = securityPreferences.isPinSet(),
+                    isBiometricEnabled = securityPreferences.isBiometricEnabled(),
+                    isAppLocked = false,
+                    lastYieldTickTimestamp = now,
+                    createdAt = now,
+                    isAdmin = true,
+                    role = "superadmin",
+                    isAuthenticated = true
+                )
+                firebaseManager.saveUserUnderSecretKey(cleanKey, defaultAdmin)
+                firebaseManager.syncUserStateToFirestore(defaultAdmin)
+                res = firebaseManager.restoreUserBySecretKey(cleanKey)
+            }
+        }
 
         val finalState = if (res.isSuccess && res.getOrNull() != null) {
             val restored = res.getOrThrow()!!
@@ -448,6 +505,21 @@ class MiningRepository(context: Context) {
 
             // Apply offline continuous yield calculation since last saved timestamp
             val caughtUp = applyOfflineCatchUpYield(restored, now)
+            val earnedGrid = caughtUp.gridBalance - restored.gridBalance
+            val earnedUsdt = caughtUp.minerBalanceUsdt - restored.minerBalanceUsdt
+            if (earnedGrid > 0.0 || earnedUsdt > 0.0) {
+                scope.launch {
+                    firebaseManager.recordActivityLog(
+                        userId = cleanKey,
+                        action = "OFFLINE_YIELD_SYNCED",
+                        details = mapOf(
+                            "grid" to earnedGrid,
+                            "usdt" to earnedUsdt,
+                            "timestamp" to now
+                        )
+                    )
+                }
+            }
 
             caughtUp.copy(
                 secretKey = cleanKey,
@@ -460,44 +532,6 @@ class MiningRepository(context: Context) {
                 role = userRole,
                 isAuthenticated = true
             )
-        } else if (isMasterAdmin) {
-            val adminState = UserMiningState(
-                uid = cleanKey,
-                secretKey = cleanKey,
-                email = "admin@hashgrid.pro",
-                nodeId = "NODE-SUPERADMIN-#0001",
-                minerBalanceUsdt = 5000.0,
-                gridBalance = 10000.0,
-                baseFreeHashrateGh = 10.0,
-                referralCount = 150,
-                activeReferredMiners = 95,
-                referralCode = "HG-ADM01",
-                userRigs = emptyList(),
-                transactions = listOf(
-                    TransactionItem(
-                        id = "tx-admin-genesis",
-                        type = TransactionType.DEPOSIT,
-                        amount = 5000.0,
-                        currency = "USDT",
-                        timestamp = now,
-                        status = TransactionStatus.COMPLETED,
-                        description = "Master SuperAdmin Genesis Protocol Liquidity",
-                        network = "BEP20 (BSC)"
-                    )
-                ),
-                isKeyBackedUp = true,
-                isPinConfigured = securityPreferences.isPinSet(),
-                isBiometricEnabled = securityPreferences.isBiometricEnabled(),
-                isAppLocked = false,
-                lastYieldTickTimestamp = now,
-                createdAt = now,
-                isAdmin = true,
-                role = "superadmin",
-                isAuthenticated = true
-            )
-            isCloudHydrated = true
-            firebaseManager.saveUserUnderSecretKey(cleanKey, adminState)
-            adminState
         } else {
             // STRICT FETCH-FIRST FAILURE:
             // Do NOT generate a fresh 0-balance account. If the key is not found, display an error.
@@ -505,7 +539,7 @@ class MiningRepository(context: Context) {
         }
 
         isCloudHydrated = true
-        securityPreferences.setSecretKey(cleanKey)
+        securityPreferences.setActiveUserKey(cleanKey)
         securityPreferences.setLoggedIn(true)
         securityPreferences.setSecretKeyBackedUp(true)
 
@@ -544,7 +578,7 @@ class MiningRepository(context: Context) {
 
     fun isPinSet(): Boolean = securityPreferences.isPinSet()
     fun isBiometricEnabled(): Boolean = securityPreferences.isBiometricEnabled()
-    fun getSecretKey(): String = securityPreferences.getSecretKey() ?: _userState.value.secretKey
+    fun getSecretKey(): String = securityPreferences.getActiveUserKey() ?: _userState.value.secretKey
 
     // ==========================================
     // NOWPAYMENTS GATEWAY & IPN INTEGRATION
@@ -819,9 +853,10 @@ class MiningRepository(context: Context) {
         scope.launch {
             firebaseManager.recordActivityLog(
                 userId = current.uid,
-                action = "MINING_SESSION_STARTED",
+                action = "MINING_START",
                 details = mapOf(
                     "hashrateGh" to current.aggregateFreeHashrateGh,
+                    "timestamp" to now,
                     "startTime" to now,
                     "endTime" to (now + duration)
                 )
@@ -878,7 +913,8 @@ class MiningRepository(context: Context) {
         _userState.value = updatedState
 
         scope.launch {
-            if (current.secretKey.isNotBlank()) {
+            val key = securityPreferences.getActiveUserKey() ?: current.secretKey
+            if (key.isNotBlank()) {
                 try {
                     val newRigMap = mapOf(
                         "nodeId" to newRig.id,
@@ -905,7 +941,7 @@ class MiningRepository(context: Context) {
                     )
                     com.google.firebase.firestore.FirebaseFirestore.getInstance()
                         .collection("users")
-                        .document(current.secretKey)
+                        .document(key)
                         .update(
                             "hardwareNodes", com.google.firebase.firestore.FieldValue.arrayUnion(newRigMap),
                             "minerBalanceUsdt", com.google.firebase.firestore.FieldValue.increment(-catalogItem.priceUsdt),
@@ -914,18 +950,75 @@ class MiningRepository(context: Context) {
                 } catch (e: Exception) {
                     Log.e("MiningRepository", "Direct Firestore update failed: ${e.message}", e)
                 }
-                firebaseManager.saveUserUnderSecretKey(current.secretKey, updatedState)
+                firebaseManager.saveUserUnderSecretKey(key, updatedState)
             }
             firebaseManager.recordPlanActivation(current.uid, newRig, newBalance)
             firebaseManager.saveOrUpdateTransaction(current.uid, tx)
+
+            // ATOMIC TEAM COMMISSION ENGINE
+            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            val referredBy = current.referredBy
+            if (!referredBy.isNullOrBlank()) {
+                val commissionUsdt = catalogItem.priceUsdt * 0.07
+                db.collection("users")
+                    .whereEqualTo("referralCode", referredBy.trim())
+                    .get()
+                    .addOnSuccessListener { querySnapshot ->
+                        val sponsorDoc = querySnapshot.documents.firstOrNull() ?: return@addOnSuccessListener
+                        val sponsorKey = sponsorDoc.id
+
+                        val sponsorTx = mapOf(
+                            "id" to "tx-ref-${UUID.randomUUID().toString().take(8)}",
+                            "type" to "REFERRAL_COMMISSION",
+                            "amount" to commissionUsdt,
+                            "currency" to "USDT",
+                            "timestamp" to System.currentTimeMillis(),
+                            "status" to "COMPLETED",
+                            "description" to "7% Affiliate Commission from ${current.nodeId.ifBlank { "Downline" }}",
+                            "fromUser" to current.nodeId
+                        )
+
+                        db.collection("users").document(sponsorKey)
+                            .update(
+                                "minerBalanceUsdt", com.google.firebase.firestore.FieldValue.increment(commissionUsdt),
+                                "usdtBalance", com.google.firebase.firestore.FieldValue.increment(commissionUsdt),
+                                "teamEarningsUsdt", com.google.firebase.firestore.FieldValue.increment(commissionUsdt),
+                                "transactions", com.google.firebase.firestore.FieldValue.arrayUnion(sponsorTx)
+                            )
+                            .addOnSuccessListener {
+                                Log.d("REFERRAL_ENGINE", "Successfully credited Sponsor ($sponsorKey) with $commissionUsdt USDT commission.")
+                            }
+
+                        // Immutable cloud activity logging for Sponsor's commission
+                        scope.launch {
+                            firebaseManager.recordActivityLog(
+                                userId = sponsorKey,
+                                action = "REFERRAL_COMMISSION",
+                                details = mapOf(
+                                    "amount" to commissionUsdt,
+                                    "commission" to commissionUsdt,
+                                    "fromUser" to current.nodeId,
+                                    "timestamp" to System.currentTimeMillis()
+                                )
+                            )
+                        }
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e("REFERRAL_ENGINE", "Failed to query Sponsor: ${e.message}")
+                    }
+            }
+
             firebaseManager.recordActivityLog(
                 userId = current.uid,
-                action = "NODE_PURCHASED",
+                action = "RIG_PURCHASE",
                 details = mapOf(
                     "rigId" to newRig.id,
                     "catalogId" to catalogItem.id,
                     "name" to catalogItem.name,
-                    "priceUsdt" to catalogItem.priceUsdt,
+                    "price" to catalogItem.priceUsdt,
+                    "amount" to catalogItem.priceUsdt,
+                    "rigName" to catalogItem.name,
+                    "timestamp" to now,
                     "hashrateGh" to catalogItem.hashrateGh,
                     "remainingBalanceUsdt" to newBalance
                 )
@@ -1059,11 +1152,12 @@ class MiningRepository(context: Context) {
             firebaseManager.saveOrUpdateTransaction(current.uid, tx)
             firebaseManager.recordActivityLog(
                 userId = current.uid,
-                action = "LUCKY_WHEEL_SPIN",
+                action = "SPIN_REWARD",
                 details = mapOf(
+                    "reward" to sector.value,
                     "rewardTitle" to sector.title,
                     "rewardType" to sector.type.name,
-                    "value" to sector.value
+                    "timestamp" to now
                 )
             )
         }
@@ -1143,16 +1237,40 @@ class MiningRepository(context: Context) {
             description = "7% Direct Commission: Downline Node Deployment ($100 Quantum Rig)"
         )
 
+        val updatedTeamCount = current.teamCount
+        val updatedTeamEarnings = current.teamEarningsUsdt + commission
+
         _userState.value = current.copy(
             minerBalanceUsdt = current.minerBalanceUsdt + commission,
+            teamEarningsUsdt = updatedTeamEarnings,
             transactions = listOf(tx) + current.transactions
         )
         scope.launch {
+            val key = securityPreferences.getActiveUserKey() ?: current.secretKey
+            if (key.isNotBlank()) {
+                com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    .collection("users")
+                    .document(key)
+                    .update(
+                        "minerBalanceUsdt", com.google.firebase.firestore.FieldValue.increment(commission),
+                        "usdtBalance", com.google.firebase.firestore.FieldValue.increment(commission),
+                        "teamEarningsUsdt", com.google.firebase.firestore.FieldValue.increment(commission),
+                        "transactions", com.google.firebase.firestore.FieldValue.arrayUnion(mapOf(
+                            "id" to tx.id,
+                            "type" to tx.type.name,
+                            "amount" to tx.amount,
+                            "currency" to tx.currency,
+                            "timestamp" to tx.timestamp,
+                            "status" to tx.status.name,
+                            "description" to tx.description
+                        ))
+                    )
+            }
             firebaseManager.saveOrUpdateTransaction(current.uid, tx)
             firebaseManager.recordActivityLog(
                 userId = current.uid,
-                action = "REFERRAL_COMMISSION_RECEIVED",
-                details = mapOf("commissionUsdt" to commission, "source" to "100_USDT_RIG")
+                action = "REFERRAL_COMMISSION",
+                details = mapOf("amount" to commission, "commission" to commission, "source" to "100_USDT_RIG", "timestamp" to now)
             )
         }
         syncToCloud()
@@ -1162,15 +1280,32 @@ class MiningRepository(context: Context) {
         val current = _userState.value
         val newRef = current.referralCount + 1
         val newActive = current.activeReferredMiners + 1
+        val newTeamCount = current.teamCount + 1
+        val hashrateBoost = (newRef * 0.25) + (newActive * 0.50)
+
         _userState.value = current.copy(
             referralCount = newRef,
-            activeReferredMiners = newActive
+            activeReferredMiners = newActive,
+            teamCount = newTeamCount,
+            totalHashrateBoostGh = hashrateBoost
         )
         scope.launch {
+            val key = securityPreferences.getActiveUserKey() ?: current.secretKey
+            if (key.isNotBlank()) {
+                com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    .collection("users")
+                    .document(key)
+                    .update(
+                        "referralCount", com.google.firebase.firestore.FieldValue.increment(1),
+                        "activeReferredMiners", com.google.firebase.firestore.FieldValue.increment(1),
+                        "teamCount", com.google.firebase.firestore.FieldValue.increment(1),
+                        "totalHashrateBoostGh", hashrateBoost
+                    )
+            }
             firebaseManager.recordActivityLog(
                 userId = current.uid,
                 action = "NEW_REFERRAL_JOINED",
-                details = mapOf("totalReferrals" to newRef, "activeMiners" to newActive)
+                details = mapOf("totalReferrals" to newRef, "activeMiners" to newActive, "teamCount" to newTeamCount)
             )
         }
         syncToCloud()

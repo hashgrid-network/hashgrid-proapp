@@ -63,6 +63,24 @@ class SecurityPreferences(context: Context) {
         }
     }
 
+    fun getActiveUserKey(): String? {
+        return try {
+            prefs.getString("ACTIVE_USER_KEY", null) ?: getSecretKey()
+        } catch (e: Throwable) {
+            getSecretKey()
+        }
+    }
+
+    fun setActiveUserKey(key: String) {
+        try {
+            prefs.edit().putString("ACTIVE_USER_KEY", key.trim().uppercase()).apply()
+            setSecretKey(key)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error setting active user key: ${e.message}")
+            setSecretKey(key)
+        }
+    }
+
     fun isSecretKeyBackedUp(): Boolean {
         return try {
             prefs.getBoolean(KEY_IS_BACKED_UP, false)

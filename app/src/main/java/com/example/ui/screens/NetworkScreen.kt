@@ -225,7 +225,6 @@ fun NetworkScreen(
                 }
             }
         }
-
         // Team Metrics Grid
         item {
             Row(
@@ -245,14 +244,14 @@ fun NetworkScreen(
                         Text("Total Team", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "${userState.referralCount}",
+                            "${userState.teamCount}",
                             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold, color = TextPrimary)
                         )
-                        Text("+0.25 GH/s each", style = MaterialTheme.typography.labelSmall.copy(color = TextEmerald, fontSize = 9.5.sp))
+                        Text("Direct & Downline", style = MaterialTheme.typography.labelSmall.copy(color = TextEmerald, fontSize = 9.5.sp))
                     }
                 }
 
-                // Active miners
+                // Team Earnings
                 GlassCard(
                     modifier = Modifier.weight(1f),
                     borderColor = EmeraldAccent.copy(alpha = 0.3f)
@@ -262,13 +261,13 @@ fun NetworkScreen(
                             .fillMaxWidth()
                             .padding(14.dp)
                     ) {
-                        Text("Active Miners", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
+                        Text("Team Earnings", style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary))
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "${userState.activeReferredMiners}",
+                            "$${String.format("%.2f", userState.teamEarningsUsdt)}",
                             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold, color = EmeraldGlow)
                         )
-                        Text("+0.50 GH/s active", style = MaterialTheme.typography.labelSmall.copy(color = TextGold, fontSize = 9.5.sp))
+                        Text("7% Direct USDT", style = MaterialTheme.typography.labelSmall.copy(color = TextGold, fontSize = 9.5.sp))
                     }
                 }
 
@@ -293,7 +292,6 @@ fun NetworkScreen(
                 }
             }
         }
-
         // Commission Rules Info Card
         item {
             GlassCard(modifier = Modifier.fillMaxWidth()) {

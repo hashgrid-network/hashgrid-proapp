@@ -355,36 +355,6 @@ fun WelcomeAuthScreen(
                                 )
                             )
 
-                            // Quick Master Admin Key Shortcut Chip
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(DarkNavySurface)
-                                    .border(1.dp, GoldPrimary.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        inputKey = "HG-ADM9-7788-5544-0001"
-                                        errorMessage = null
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 8.dp)
-                                    .testTag("auth_quick_master_admin_chip")
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text("👑", fontSize = 14.sp)
-                                    Text(
-                                        text = "Paste Super Admin Key: HG-ADM9-7788-5544-0001",
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            color = TextGold,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 9.sp
-                                        )
-                                    )
-                                }
-                            }
-
                             if (errorMessage != null) {
                                 Text(
                                     text = errorMessage!!,

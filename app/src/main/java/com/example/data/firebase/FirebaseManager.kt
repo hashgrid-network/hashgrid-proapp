@@ -430,6 +430,9 @@ class FirebaseManager(private val context: Context) {
                 "referredBy" to state.referredBy,
                 "referralCount" to state.referralCount,
                 "activeReferredMiners" to state.activeReferredMiners,
+                "teamCount" to state.teamCount,
+                "teamEarningsUsdt" to state.teamEarningsUsdt,
+                "totalHashrateBoostGh" to state.totalHashrateBoostGh,
                 "hardwareNodes" to hardwareNodesList,
                 "activeMiningRigs" to hardwareNodesList,
                 "depositHistory" to depositsList,
@@ -600,6 +603,9 @@ class FirebaseManager(private val context: Context) {
             val tempBoostGh = snapshot.getDouble("temporaryBoostHashrateGh") ?: 0.0
             val tempBoostExpiry = snapshot.getLong("temporaryBoostExpiry") ?: 0L
             val lastDailySpin = snapshot.getLong("lastDailySpinTimestamp") ?: 0L
+            val teamCount = snapshot.getLong("teamCount") ?: snapshot.getLong("referralCount") ?: 0L
+            val teamEarningsUsdt = snapshot.getDouble("teamEarningsUsdt") ?: 0.0
+            val totalHashrateBoostGh = snapshot.getDouble("totalHashrateBoostGh") ?: 0.0
             val createdAt = snapshot.getLong("createdAt") ?: System.currentTimeMillis()
             val isMasterAdmin = SecretKeyUtils.isMasterAdminKey(cleanKey) || (snapshot.getBoolean("isAdmin") ?: false)
             val userRole = if (isMasterAdmin) "superadmin" else (snapshot.getString("role") ?: "user")
@@ -771,6 +777,9 @@ class FirebaseManager(private val context: Context) {
                 baseFreeHashrateGh = baseFreeHashrate,
                 referralCount = referralCount,
                 activeReferredMiners = activeReferredMiners,
+                teamCount = teamCount,
+                teamEarningsUsdt = teamEarningsUsdt,
+                totalHashrateBoostGh = totalHashrateBoostGh,
                 temporaryBoostHashrateGh = tempBoostGh,
                 temporaryBoostExpiry = tempBoostExpiry,
                 referralCode = referralCode,
