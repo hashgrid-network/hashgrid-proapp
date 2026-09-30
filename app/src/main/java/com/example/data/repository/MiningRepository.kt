@@ -655,6 +655,42 @@ class MiningRepository(context: Context) {
         }
     }
 
+    /**
+     * Initializes or restores a user account, ensuring existing data is not overwritten.
+     */
+    fun initializeOrRestoreUser(key: String, onComplete: (Boolean) -> Unit) {
+        val docRef = com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("users").document(key)
+        docRef.get().addOnSuccessListener { snapshot ->
+            if (snapshot.exists()) {
+                // RESTORE EXISTING DATA - DO NOT OVERWRITE
+                val usdt = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble() ?: 0.0
+                val grid = (snapshot.get("gridBalance") as? Number)?.toDouble() ?: 0.0
+                val isMining = snapshot.getBoolean("isFreeMiningActive") ?: false
+                val sessionEnd = (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong() ?: 0L
+                
+                _userState.value = _userState.value.copy(
+                    minerBalanceUsdt = usdt,
+                    gridBalance = grid,
+                    isFreeMiningActive = isMining && (System.currentTimeMillis() < sessionEnd)
+                )
+            } else {
+                // CREATE ONLY IF TOTALLY NEW USER
+                val initialData = mapOf(
+                    "secretKey" to key,
+                    "minerBalanceUsdt" to 0.0,
+                    "gridBalance" to 0.0,
+                    "isFreeMiningActive" to false,
+                    "createdAt" to System.currentTimeMillis()
+                )
+                docRef.set(initialData)
+            }
+            securityPreferences.setActiveUserKey(key)
+            onComplete(true)
+        }.addOnFailureListener {
+            onComplete(false)
+        }
+    }
+
     suspend fun restoreAccountWithSecretKey(secretKey: String): Result<UserMiningState> = withContext(Dispatchers.IO) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
         var res: Result<UserMiningState?>? = null
