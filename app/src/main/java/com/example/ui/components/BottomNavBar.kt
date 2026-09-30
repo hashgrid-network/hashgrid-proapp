@@ -166,7 +166,11 @@ fun BottomNavBar(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) {
-                    onTabSelected(AppNavTab.CLOUD_MINER)
+                    try {
+                        onTabSelected(AppNavTab.HOME)
+                    } catch (e: Throwable) {
+                        android.util.Log.e("NAV_SAFE", "Navigation to home handled", e)
+                    }
                 }
                 .testTag("nav_cloud_miner_center"),
             contentAlignment = Alignment.Center

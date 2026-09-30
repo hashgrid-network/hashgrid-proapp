@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.*
@@ -89,8 +90,15 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun startFreeMining() {
-        repository.startFreeMiningSession()
-        emitToast("Core Online! 24-Hour Free GRID Mining Session Initiated.")
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            try {
+                repository.startFreeMiningSession()
+                emitToast("24h Mining Core Activated!")
+            } catch (e: Exception) {
+                Log.e("MiningViewModel", "Start mining session exception: ${e.message}", e)
+                emitToast("Offline: Mining will sync once connected")
+            }
+        }
     }
 
     fun buyRig(item: RigCatalogItem) {

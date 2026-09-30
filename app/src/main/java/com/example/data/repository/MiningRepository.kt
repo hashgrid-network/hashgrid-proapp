@@ -226,7 +226,7 @@ class MiningRepository(context: Context) {
                 val cleanKey = secretKey.trim().uppercase()
                 val docRef = db.collection("users").document(cleanKey)
                 
-                userListenerRegistration = docRef.addSnapshotListener { snapshot, error ->
+                userListenerRegistration = docRef.addSnapshotListener(com.google.firebase.firestore.MetadataChanges.INCLUDE) { snapshot, error ->
                     if (error != null) {
                         isCloudSynced.value = false
                         connectionErrorMsg.value = "Firestore Error: ${error.code} - ${error.localizedMessage}"
