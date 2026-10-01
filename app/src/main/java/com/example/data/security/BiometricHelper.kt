@@ -27,11 +27,12 @@ object BiometricHelper {
     fun showBiometricPrompt(
         activity: FragmentActivity,
         title: String = "HashGrid Pro Security",
-        subtitle: String = "Touch fingerprint sensor to unlock",
+        subtitle: String = "Biometric Authentication Required",
+        description: String = "Scan your fingerprint or facial recognition to access the mining dashboard.",
         negativeButtonText: String = "Use PIN",
         onSuccess: () -> Unit,
-        onError: (String) -> Unit,
-        onFailed: () -> Unit
+        onError: (String) -> Unit = {},
+        onFailed: () -> Unit = {}
     ) {
         if (activity.isFinishing || activity.isDestroyed) {
             return
@@ -72,7 +73,9 @@ object BiometricHelper {
             val promptInfo = BiometricPrompt.PromptInfo.Builder()
                 .setTitle(title)
                 .setSubtitle(subtitle)
+                .setDescription(description)
                 .setNegativeButtonText(negativeButtonText)
+                .setConfirmationRequired(false)
                 .setAllowedAuthenticators(
                     BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK
                 )

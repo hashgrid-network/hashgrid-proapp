@@ -51,6 +51,10 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     val minerBalanceUsdt: StateFlow<Double> = minerBalance.asStateFlow()
     val gridBalance = MutableStateFlow(0.0)
     val deployedNodesCount = MutableStateFlow(0)
+    val deployedRigs = MutableStateFlow<List<Map<String, Any>>>(emptyList())
+    val _deployedRigs = deployedRigs
+    val hardwareNodes = deployedRigs
+    val _hardwareNodes = deployedRigs
     val _minerBalance = minerBalance
     val _gridBalance = gridBalance
     val _deployedNodesCount = deployedNodesCount
@@ -68,7 +72,8 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
                 if (acc != null) {
                     minerBalance.value = acc.minerBalanceUsdt
                     gridBalance.value = acc.gridBalance
-                    deployedNodesCount.value = acc.deployedRigs.size
+                    _deployedRigs.value = acc.hardwareNodes
+                    _deployedNodesCount.value = acc.hardwareNodes.size
                     isMiningActive.value = acc.isFreeMiningActive
                     sessionEndTime.value = acc.freeMiningEndTime
                 }
@@ -80,7 +85,7 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
                 if (accountState.value == null) {
                     minerBalance.value = state.minerBalanceUsdt
                     gridBalance.value = maxOf(state.gridBalance, gridBalance.value)
-                    deployedNodesCount.value = state.userRigs.size
+                    _deployedNodesCount.value = state.userRigs.size
                     isMiningActive.value = state.isFreeMiningActive
                     sessionEndTime.value = state.freeMiningSessionEnd
                 }
@@ -357,19 +362,14 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
 
     fun unlockWithBiometric() {
         repository.setAppLocked(false)
+        emitToast("Biometric authentication verified. Mining terminal unlocked.")
     }
 
     fun lockApp() {
-        if (repository.isPinSet()) {
-            repository.setAppLocked(true)
-        }
+        repository.setAppLocked(true)
     }
 
     fun setAppLocked(locked: Boolean) {
-        if (locked && !repository.isPinSet()) {
-            // Can't lock if no PIN configured
-            return
-        }
         repository.setAppLocked(locked)
     }
 
@@ -453,7 +453,8 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
             _gridBalance.value = gridBalance
             isMiningActive.value = isStillMining
             sessionEndTime.value = miningEndTime
-            deployedNodesCount.value = deployedRigs.size
+            _deployedRigs.value = deployedRigs
+            _deployedNodesCount.value = deployedRigs.size
             repository.loadStateIntoApp(usdtBalance, gridBalance, isStillMining, miningEndTime, deployedRigs)
         }
     }
@@ -471,7 +472,7 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
             val now = System.currentTimeMillis()
 
             if (!snapshot.exists()) {
-                // New User Setup
+                // New User Setup if document does not exist
                 val isAdminKey = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
                 val initialUsdt = if (isAdminKey) 3000.0 else 0.0
                 val initialGrid = if (isAdminKey) 5000.0 else 0.0
@@ -482,64 +483,31 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
                     gridBalance = initialGrid,
                     isFreeMiningActive = false,
                     lastSyncTimestamp = now,
-                    deployedRigs = emptyList()
+                    hardwareNodes = emptyList()
                 )
                 docRef.set(initialAccount.toMap(), SetOptions.merge())
+                _deployedRigs.value = emptyList()
+                _deployedNodesCount.value = 0
                 loadStateIntoApp(initialUsdt, initialGrid, false, 0L, emptyList())
                 return@addOnSuccessListener
             }
 
-            // 1. Fetch Existing Data via UserCloudAccount (NEVER OVERWRITE WITH ZERO)
-            val data = snapshot.data ?: emptyMap<String, Any>()
-            val account = data.toUserCloudAccount(cleanKey)
-            var usdtBalance = account.minerBalanceUsdt
-            var gridBalance = account.gridBalance
-            val lastSync = account.lastSyncTimestamp
-            val isFreeMining = account.isFreeMiningActive
-            val miningEndTime = account.freeMiningEndTime
-            val deployedRigs = account.deployedRigs
+            // 1. DIRECTLY BIND TO EXISTING FIRESTORE DOCUMENT WITHOUT OVERWRITING
+            val usdtBalance = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble() ?: 0.0
+            val gridBalance = (snapshot.get("gridBalance") as? Number)?.toDouble() ?: 0.0
+            val isFreeMining = snapshot.getBoolean("isFreeMiningActive") ?: false
+            val miningEndTime = (snapshot.get("freeMiningEndTime") as? Number)?.toLong()
+                ?: (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong() ?: 0L
 
-            // 2. OFFLINE CALCULATION: Free Mining Catch-up
-            if (isFreeMining && lastSync < miningEndTime) {
-                val effectiveEnd = Math.min(now, miningEndTime)
-                val offlineSeconds = Math.max(0L, (effectiveEnd - lastSync) / 1000)
-                // Rate: 2 GH/s gives ~50 GRID per 24h
-                val tokensPerSec = (account.aggregateHashpowerGh / 10.0) * (50.0 / 86400.0)
-                val offlineMinedGrid = offlineSeconds * tokensPerSec
-                gridBalance += offlineMinedGrid
-            }
-            val isStillMining = isFreeMining && (now < miningEndTime)
+            // Read hardwareNodes exactly as specified
+            val rigs = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>)
+                ?: (snapshot.get("deployedRigs") as? List<Map<String, Any>>)
+                ?: emptyList()
+            _deployedRigs.value = rigs
+            _deployedNodesCount.value = rigs.size
 
-            // 3. OFFLINE CALCULATION: Hardware Nodes Daily Yield Catch-up
-            deployedRigs.forEach { rigMap ->
-                val node = rigMap.toHardwareNode()
-                val dailyYield = if (node.dailyYieldUsdt > 0.0) node.dailyYieldUsdt else (node.costUsdt * 0.15 / 30.0)
-                val deployedAt = if (node.deployedTimestamp > 0L) node.deployedTimestamp else now
-                val totalDays = if (node.totalDays > 0) node.totalDays else 200
-                val expiryTime = deployedAt + (totalDays.toLong() * 86400000L)
-
-                if (lastSync < expiryTime) {
-                    val effectiveEnd = Math.min(now, expiryTime)
-                    val elapsedDays = Math.max(0.0, (effectiveEnd - lastSync).toDouble() / 86400000.0)
-                    usdtBalance += (dailyYield * elapsedDays)
-                }
-            }
-
-            // 4. Save the offline growth back to Firestore immediately
-            val updatedAccount = account.copy(
-                minerBalanceUsdt = usdtBalance,
-                gridBalance = gridBalance,
-                isFreeMiningActive = isStillMining,
-                freeMiningEndTime = miningEndTime,
-                lastSyncTimestamp = now
-            )
-            val updateMap = updatedAccount.toMap()
-            docRef.update(updateMap).addOnFailureListener {
-                docRef.set(updateMap, SetOptions.merge())
-            }
-
-            // 5. Update UI StateFlows
-            loadStateIntoApp(usdtBalance, gridBalance, isStillMining, miningEndTime, deployedRigs)
+            // 2. Update UI StateFlows directly from Firestore
+            loadStateIntoApp(usdtBalance, gridBalance, isFreeMining, miningEndTime, rigs)
             repository.attachUserDocumentRealTimeListener(cleanKey)
         }.addOnFailureListener { e ->
             android.util.Log.e("SYNC_OFFLINE", "Offline sync fallback", e)
@@ -578,22 +546,15 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
 
         val isAdminKey = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
 
-        // 2. Pre-set Admin privileges & fallback balance if Admin key
-        val defaultUsdt = if (isAdminKey) 3000.0 else repository.prefs.getFloat("miner_balance", 0f).toDouble()
-        val defaultGrid = if (isAdminKey) 5000.0 else repository.prefs.getFloat("grid_balance", 0f).toDouble()
+        // 2. Pre-set privileges & fallback balance without overwriting Firestore document
+        val defaultUsdt = repository.prefs.getFloat("miner_balance", 0f).toDouble()
+        val defaultGrid = repository.prefs.getFloat("grid_balance", 0f).toDouble()
 
-        if (isAdminKey) {
-            // Ensure balance never resets to zero on login
-            if (minerBalance.value <= 0.0) {
-                setLocalBalance(defaultUsdt, defaultGrid)
-            }
-        } else {
-            minerBalance.value = defaultUsdt
-            gridBalance.value = defaultGrid
-        }
+        minerBalance.value = defaultUsdt
+        gridBalance.value = defaultGrid
 
-        val currentMinerBal = if (isAdminKey && minerBalance.value <= 0.0) defaultUsdt else minerBalance.value
-        val currentGridBal = if (isAdminKey && gridBalance.value <= 0.0) defaultGrid else gridBalance.value
+        val currentMinerBal = minerBalance.value
+        val currentGridBal = gridBalance.value
 
         // 3. FORCE IMMEDIATE NAVIGATION TO DASHBOARD (0.01 sec)
         val instantState = UserMiningState(

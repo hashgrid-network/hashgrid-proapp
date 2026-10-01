@@ -55,19 +55,20 @@ fun LockScreenOverlay(
 
     val shakeOffset = remember { Animatable(0f) }
 
-    // Biometric auto-trigger on first display
+    // Biometric auto-trigger on first display / app launch
     LaunchedEffect(Unit) {
-        if (isBiometricEnabled && activity != null && BiometricHelper.isBiometricAvailable(context)) {
+        if (activity != null && BiometricHelper.isBiometricAvailable(context)) {
             BiometricHelper.showBiometricPrompt(
                 activity = activity,
                 title = "HashGrid Pro Security",
-                subtitle = "Touch sensor to unlock terminal",
+                subtitle = "Biometric Authentication Required",
+                description = "Scan your fingerprint or facial recognition to access the mining dashboard.",
                 negativeButtonText = "Use PIN",
                 onSuccess = {
                     onUnlockWithBiometric()
                 },
-                onError = { /* Biometric dismissed or error, user can enter PIN */ },
-                onFailed = { /* Fingerprint failed */ }
+                onError = { /* User can enter PIN or tap biometric button */ },
+                onFailed = { /* Biometric failed */ }
             )
         }
     }
@@ -176,12 +177,58 @@ fun LockScreenOverlay(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "Enter 4-Digit Security PIN",
+                    text = if (BiometricHelper.isBiometricAvailable(context))
+                        "Scan Fingerprint / Face or Enter PIN"
+                    else
+                        "Enter 4-Digit Security PIN",
                     fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.6f)
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontWeight = FontWeight.Medium
                 )
 
-                Spacer(modifier = Modifier.height(28.dp))
+                if (BiometricHelper.isBiometricAvailable(context) && activity != null) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Button(
+                        onClick = {
+                            BiometricHelper.showBiometricPrompt(
+                                activity = activity,
+                                title = "HashGrid Pro Security",
+                                subtitle = "Biometric Authentication Required",
+                                description = "Scan your fingerprint or facial recognition to access the mining dashboard.",
+                                negativeButtonText = "Use PIN",
+                                onSuccess = { onUnlockWithBiometric() },
+                                onError = {},
+                                onFailed = {}
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CyberGold.copy(alpha = 0.15f),
+                            contentColor = CyberGold
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, CyberGold.copy(alpha = 0.4f)),
+                        shape = RoundedCornerShape(20.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Fingerprint,
+                                contentDescription = "Biometric Sensor",
+                                tint = CyberGold,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Scan Fingerprint / Face",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
 
                 // PIN Dots
                 Row(
@@ -238,7 +285,7 @@ fun LockScreenOverlay(
                         for (key in row) {
                             when (key) {
                                 "BIO" -> {
-                                    if (isBiometricEnabled && activity != null && BiometricHelper.isBiometricAvailable(context)) {
+                                    if (activity != null && BiometricHelper.isBiometricAvailable(context)) {
                                         Box(
                                             modifier = Modifier
                                                 .size(72.dp)
@@ -247,6 +294,10 @@ fun LockScreenOverlay(
                                                 .clickable {
                                                     BiometricHelper.showBiometricPrompt(
                                                         activity = activity,
+                                                        title = "HashGrid Pro Security",
+                                                        subtitle = "Biometric Authentication Required",
+                                                        description = "Scan your fingerprint or facial recognition to access the mining dashboard.",
+                                                        negativeButtonText = "Use PIN",
                                                         onSuccess = { onUnlockWithBiometric() },
                                                         onError = {},
                                                         onFailed = {}

@@ -38,18 +38,22 @@ class RigsStoreViewModel(application: Application) : AndroidViewModel(applicatio
             "deployedTimestamp" to now,
             "totalDays" to 200
         )
-        val rigMap = hashMapOf(
+        val rigMap = hashMapOf<String, Any>(
+            "id" to "NODE-${now.toString().takeLast(6)}",
             "nodeId" to "NODE-${now.toString().takeLast(6)}",
             "name" to selectedRig.name,
+            "costUsdt" to priceUsdt,
             "priceUsdt" to priceUsdt,
+            "dailyYieldUsdt" to dailyYieldUsdt,
             "hashrateGh" to selectedRig.hashrateGh.toDouble(),
-            "status" to "ACTIVE",
-            "daysRemaining" to 200,
-            "totalEarnedUsdt" to 0.0
+            "deployedTimestamp" to now,
+            "purchaseTimestamp" to now,
+            "totalDays" to 200,
+            "durationDays" to 200,
+            "status" to "ACTIVE"
         )
         FirebaseFirestore.getInstance().collection("users").document(key)
             .update(
-                "deployedRigs", FieldValue.arrayUnion(deployedRigMap),
                 "hardwareNodes", FieldValue.arrayUnion(rigMap),
                 "minerBalanceUsdt", FieldValue.increment(-priceUsdt),
                 "dailySpentUsdt", FieldValue.increment(priceUsdt),
@@ -65,28 +69,24 @@ class RigsStoreViewModel(application: Application) : AndroidViewModel(applicatio
                 val now = System.currentTimeMillis()
                 val dailyYieldUsdt = (priceUsdt * 0.15) / 30.0
 
-                val deployedRigMap = hashMapOf(
+                val rigMap = hashMapOf<String, Any>(
+                    "id" to "NODE-${now.toString().takeLast(6)}",
+                    "nodeId" to "NODE-${now.toString().takeLast(6)}",
                     "name" to selectedRig.name,
                     "costUsdt" to priceUsdt,
+                    "priceUsdt" to priceUsdt,
                     "dailyYieldUsdt" to dailyYieldUsdt,
                     "hashrateGh" to selectedRig.hashrateGh.toDouble(),
                     "deployedTimestamp" to now,
-                    "totalDays" to 200
-                )
-                val rigMap = hashMapOf(
-                    "nodeId" to "NODE-${now.toString().takeLast(6)}",
-                    "name" to selectedRig.name,
-                    "priceUsdt" to priceUsdt,
-                    "hashrateGh" to selectedRig.hashrateGh.toDouble(),
-                    "status" to "ACTIVE",
-                    "daysRemaining" to 200,
-                    "purchaseTimestamp" to now
+                    "purchaseTimestamp" to now,
+                    "totalDays" to 200,
+                    "durationDays" to 200,
+                    "status" to "ACTIVE"
                 )
 
                 // Direct Firestore increment/decrement write to ensure absolute lock-step synchronization with cloud state
                 FirebaseFirestore.getInstance().collection("users").document(activeKey)
                     .update(
-                        "deployedRigs", FieldValue.arrayUnion(deployedRigMap),
                         "hardwareNodes", FieldValue.arrayUnion(rigMap),
                         "minerBalanceUsdt", FieldValue.increment(-priceUsdt),
                         "dailySpentUsdt", FieldValue.increment(priceUsdt),

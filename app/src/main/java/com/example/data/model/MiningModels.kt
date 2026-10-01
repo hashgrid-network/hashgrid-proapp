@@ -66,17 +66,25 @@ data class UserCloudAccount(
     val freeMiningEndTime: Long = 0L,
     val aggregateHashpowerGh: Double = 2.0,
     val lastSyncTimestamp: Long = System.currentTimeMillis(),
-    val deployedRigs: List<Map<String, Any>> = emptyList()
-)
+    val hardwareNodes: List<Map<String, Any>> = emptyList()
+) {
+    // Backwards compatibility getter
+    val deployedRigs: List<Map<String, Any>>
+        get() = hardwareNodes
+}
 
 fun HardwareNode.toMap(): Map<String, Any> = mapOf(
     "id" to id,
+    "nodeId" to id,
     "name" to name,
     "hashrateGh" to hashrateGh,
     "costUsdt" to costUsdt,
+    "priceUsdt" to costUsdt,
     "dailyYieldUsdt" to dailyYieldUsdt,
     "deployedTimestamp" to deployedTimestamp,
-    "totalDays" to totalDays
+    "purchaseTimestamp" to deployedTimestamp,
+    "totalDays" to totalDays,
+    "durationDays" to totalDays
 )
 
 fun Map<String, Any>.toHardwareNode(): HardwareNode = HardwareNode(
@@ -91,6 +99,7 @@ fun Map<String, Any>.toHardwareNode(): HardwareNode = HardwareNode(
 
 fun UserCloudAccount.toMap(): Map<String, Any> = mapOf(
     "secretKey" to secretKey,
+    "nodeId" to (secretKey.take(12)),
     "isAdmin" to isAdmin,
     "minerBalanceUsdt" to minerBalanceUsdt,
     "gridBalance" to gridBalance,
@@ -99,7 +108,7 @@ fun UserCloudAccount.toMap(): Map<String, Any> = mapOf(
     "freeMiningEndTime" to freeMiningEndTime,
     "aggregateHashpowerGh" to aggregateHashpowerGh,
     "lastSyncTimestamp" to lastSyncTimestamp,
-    "deployedRigs" to deployedRigs
+    "hardwareNodes" to hardwareNodes
 )
 
 fun Map<String, Any>.toUserCloudAccount(key: String): UserCloudAccount = UserCloudAccount(
@@ -113,13 +122,13 @@ fun Map<String, Any>.toUserCloudAccount(key: String): UserCloudAccount = UserClo
         ?: (this["freeMiningSessionEnd"] as? Number)?.toLong() ?: 0L,
     aggregateHashpowerGh = (this["aggregateHashpowerGh"] as? Number)?.toDouble() ?: 2.0,
     lastSyncTimestamp = (this["lastSyncTimestamp"] as? Number)?.toLong() ?: System.currentTimeMillis(),
-    deployedRigs = (this["deployedRigs"] as? List<Map<String, Any>>)
-        ?: (this["hardwareNodes"] as? List<Map<String, Any>>)
+    hardwareNodes = (this["hardwareNodes"] as? List<Map<String, Any>>)
+        ?: (this["deployedRigs"] as? List<Map<String, Any>>)
         ?: emptyList()
 )
 
 fun UserCloudAccount.toUserMiningState(): UserMiningState {
-    val rigs = deployedRigs.map { rigMap ->
+    val rigs = hardwareNodes.map { rigMap ->
         val node = rigMap.toHardwareNode()
         UserRig(
             id = node.id,
@@ -160,7 +169,7 @@ fun UserMiningState.toUserCloudAccount(): UserCloudAccount {
         freeMiningEndTime = freeMiningSessionEnd,
         aggregateHashpowerGh = aggregateFreeHashrateGh,
         lastSyncTimestamp = lastSyncTimestamp,
-        deployedRigs = userRigs.map { rig ->
+        hardwareNodes = userRigs.map { rig ->
             HardwareNode(
                 id = rig.id,
                 name = rig.name,
