@@ -119,7 +119,8 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.height(14.dp))
 
                     // Total Estimated Portfolio Value Header
-                    val gridPreLaunchUsdValue = userState.gridBalance * gridPriceUsd
+                    val displayGridBalance = maxOf(gridBalance, userState.gridBalance)
+                    val gridPreLaunchUsdValue = displayGridBalance * gridPriceUsd
                     val totalPortfolioUsd = userState.minerBalanceUsdt + gridPreLaunchUsdValue
 
                     Row(
@@ -242,7 +243,7 @@ fun HomeScreen(
                             }
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "${String.format("%,.3f", userState.gridBalance)} GRID",
+                                text = "${String.format("%,.4f", displayGridBalance)} GRID",
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Color.White

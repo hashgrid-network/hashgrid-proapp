@@ -28,6 +28,7 @@ class MiningRepository(context: Context) {
 
     companion object {
         const val GRID_PRELAUNCH_PRICE_USD = 0.01 // Default Pre-Launch rate: 1 GRID = 0.01 USDT
+        const val TARGET_DAILY_GRID = 302.4 // Target daily GRID for 10 GH/s (~0.0035/sec)
     }
 
     private val _userState = MutableStateFlow(loadInitialState())
@@ -169,7 +170,16 @@ class MiningRepository(context: Context) {
 
         val sessionStart = prefs.getLong("free_session_start", 0L)
         val sessionEnd = prefs.getLong("free_session_end", 0L)
+        val startTime = prefs.getLong("mining_start_time_millis", sessionStart)
+        val baselineGrid = prefs.getFloat("baseline_grid_balance", initialGrid.toFloat()).toDouble()
         var isFreeActive = prefs.getBoolean("free_session_active", false) && (now < sessionEnd)
+
+        if (isFreeActive && startTime > 0 && now > startTime) {
+            val elapsedSeconds = ((now - startTime) / 1000.0).coerceAtLeast(0.0)
+            val tokensPerSecond = (2.0 / 10.0) * (TARGET_DAILY_GRID / 86400.0)
+            val sessionMined = elapsedSeconds * tokensPerSecond
+            initialGrid = maxOf(initialGrid, baselineGrid + sessionMined)
+        }
 
         val loadedRigs = emptyList<UserRig>()
 
@@ -247,21 +257,36 @@ class MiningRepository(context: Context) {
 
                     val current = _userState.value
                     if (current.secretKey.trim().uppercase() == cleanKey || current.secretKey.isBlank()) {
-                        // Extract real-time balances immediately
+                        // Extract real-time balances immediately with timestamp accrual protection
                         val usdt = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble()
                             ?: (snapshot.get("usdtBalance") as? Number)?.toDouble()
                             ?: current.minerBalanceUsdt
-                        val grid = (snapshot.get("gridBalance") as? Number)?.toDouble()
+                        val cloudGrid = (snapshot.get("gridBalance") as? Number)?.toDouble()
                             ?: current.gridBalance
-                        val isMining = snapshot.getBoolean("isFreeMiningActive")
-                            ?: snapshot.getBoolean("isMiningActive")
-                            ?: current.isFreeMiningActive
-                        val sessionStart = (snapshot.get("freeMiningSessionStart") as? Number)?.toLong()
+                        val cloudBaseline = (snapshot.get("baselineGridBalance") as? Number)?.toDouble()
+                            ?: prefs.getFloat("baseline_grid_balance", cloudGrid.toFloat()).toDouble()
+                        val sessionStart = (snapshot.get("miningStartTimeMillis") as? Number)?.toLong()
+                            ?: (snapshot.get("freeMiningSessionStart") as? Number)?.toLong()
                             ?: (snapshot.get("miningStartTime") as? Number)?.toLong()
                             ?: current.freeMiningSessionStart
                         val sessionEnd = (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong()
+                            ?: (snapshot.get("sessionEndTime") as? Number)?.toLong()
                             ?: (snapshot.get("miningEndTime") as? Number)?.toLong()
                             ?: current.freeMiningSessionEnd
+                        val isMining = (snapshot.getBoolean("isFreeMiningActive")
+                            ?: snapshot.getBoolean("isMiningActive")
+                            ?: current.isFreeMiningActive) && (System.currentTimeMillis() < sessionEnd)
+
+                        val nowTs = System.currentTimeMillis()
+                        val sessionMined = if (isMining && sessionStart > 0 && nowTs > sessionStart) {
+                            val elapsedSeconds = ((nowTs - sessionStart) / 1000.0).coerceAtLeast(0.0)
+                            val hashrate = current.aggregateFreeHashrateGh.coerceAtLeast(2.0)
+                            val tokensPerSec = (hashrate / 10.0) * (TARGET_DAILY_GRID / 86400.0)
+                            elapsedSeconds * tokensPerSec
+                        } else 0.0
+
+                        val accruedGrid = cloudBaseline + sessionMined
+                        val effectiveGrid = maxOf(accruedGrid, cloudGrid, current.gridBalance, prefs.getFloat("grid_balance", 0f).toDouble())
 
                         // Parse hardware nodes / rigs list
                         val rawRigs = snapshot.get("hardwareNodes") as? List<Map<String, Any>> ?: emptyList()
@@ -337,7 +362,7 @@ class MiningRepository(context: Context) {
                         _userState.value = _userState.value.copy(
                             uid = cleanKey,
                             secretKey = cleanKey,
-                            gridBalance = grid,
+                            gridBalance = effectiveGrid,
                             minerBalanceUsdt = usdt,
                             isFreeMiningActive = isMining && (System.currentTimeMillis() < sessionEnd),
                             freeMiningSessionStart = sessionStart,
@@ -349,14 +374,16 @@ class MiningRepository(context: Context) {
                         )
 
                         prefs.edit()
-                            .putFloat("grid_balance", grid.toFloat())
+                            .putFloat("grid_balance", effectiveGrid.toFloat())
                             .putFloat("miner_balance", usdt.toFloat())
                             .putLong("free_session_start", sessionStart)
                             .putLong("free_session_end", sessionEnd)
+                            .putLong("mining_start_time_millis", sessionStart)
+                            .putFloat("baseline_grid_balance", cloudBaseline.toFloat())
                             .putBoolean("free_session_active", isMining)
                             .apply()
 
-                        Log.i("MiningRepository", "Live Firestore Snapshot: Real-time update USDT=$usdt, GRID=$grid for $cleanKey")
+                        Log.i("MiningRepository", "Live Firestore Snapshot: Real-time update USDT=$usdt, GRID=$effectiveGrid for $cleanKey")
                     }
                 }
             } catch (e: Exception) {
@@ -454,9 +481,8 @@ class MiningRepository(context: Context) {
         
         var newGridBalance = current.gridBalance
         if (isFreeActive) {
-            val hashrate = current.aggregateFreeHashrateGh
-            val deltaGrid = (hashrate * 0.00035)
-            newGridBalance += deltaGrid
+            val computedGrid = computeAccruedGridBalance(now)
+            newGridBalance = maxOf(computedGrid, current.gridBalance)
         }
 
         val elapsedSec = ((now - lastYieldTickTime) / 1000.0).coerceAtLeast(0.0)
@@ -1094,12 +1120,77 @@ class MiningRepository(context: Context) {
         }
     }
 
+    fun computeAccruedGridBalance(now: Long = System.currentTimeMillis()): Double {
+        val state = _userState.value
+        val sessionEnd = prefs.getLong("free_session_end", state.freeMiningSessionEnd)
+        val startTime = prefs.getLong("mining_start_time_millis", state.freeMiningSessionStart)
+        val baselineGrid = prefs.getFloat("baseline_grid_balance", state.gridBalance.toFloat()).toDouble()
+        val isMining = prefs.getBoolean("free_session_active", state.isFreeMiningActive) && (now < sessionEnd) && (startTime > 0)
+
+        if (isMining) {
+            val elapsedSeconds = ((now - startTime) / 1000.0).coerceAtLeast(0.0)
+            val currentHashrateGh = state.aggregateFreeHashrateGh.coerceAtLeast(2.0)
+            val tokensPerSecond = (currentHashrateGh / 10.0) * (TARGET_DAILY_GRID / 86400.0)
+            val sessionMined = elapsedSeconds * tokensPerSecond
+            return baselineGrid + sessionMined
+        }
+        return maxOf(baselineGrid, state.gridBalance, prefs.getFloat("grid_balance", 0f).toDouble())
+    }
+
+    fun saveGridBalanceOnPause(computedGrid: Double) {
+        val now = System.currentTimeMillis()
+        val current = _userState.value
+        val activeKey = current.secretKey.ifBlank { securityPreferences.getActiveUserKey() ?: "" }
+
+        prefs.edit()
+            .putFloat("grid_balance", computedGrid.toFloat())
+            .putLong("last_yield_tick", now)
+            .apply()
+
+        _userState.value = current.copy(
+            gridBalance = computedGrid,
+            lastYieldTickTimestamp = now
+        )
+
+        if (activeKey.isNotBlank()) {
+            try {
+                val updateMap = mapOf(
+                    "gridBalance" to computedGrid,
+                    "lastSyncTimestamp" to now,
+                    "lastUpdatedTimestamp" to now
+                )
+                com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    .collection("users")
+                    .document(activeKey)
+                    .set(updateMap, com.google.firebase.firestore.SetOptions.merge())
+                    .addOnSuccessListener {
+                        Log.d("MiningRepository", "Auto-saved grid balance $computedGrid on pause/stop")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e("MiningRepository", "Auto-save on pause failed: ${e.message}")
+                    }
+            } catch (e: Exception) {
+                Log.e("MiningRepository", "Auto-save exception on pause", e)
+            }
+        }
+    }
+
     fun startFreeMiningSession() {
         val now = System.currentTimeMillis()
-        val duration = 24L * 60 * 60 * 1000
+        val duration = 24L * 60 * 60 * 1000L
         val current = _userState.value
         val end = now + duration
         val activeKey = current.secretKey.ifBlank { securityPreferences.getActiveUserKey() ?: "HG-ADM9-7788-5544-0001" }
+        val baselineGrid = current.gridBalance
+
+        prefs.edit()
+            .putLong("mining_start_time_millis", now)
+            .putFloat("baseline_grid_balance", baselineGrid.toFloat())
+            .putLong("free_session_start", now)
+            .putLong("free_session_end", end)
+            .putBoolean("free_session_active", true)
+            .putFloat("grid_balance", baselineGrid.toFloat())
+            .apply()
 
         val updatedState = current.copy(
             isFreeMiningActive = true,
@@ -1113,11 +1204,14 @@ class MiningRepository(context: Context) {
         // Write directly to Firestore document using SetOptions.merge()
         val updateMap = mapOf(
             "isFreeMiningActive" to true,
-            "freeMiningSessionStart" to now,
-            "freeMiningSessionEnd" to end,
             "isMiningActive" to true,
+            "miningStartTimeMillis" to now,
             "miningStartTime" to now,
+            "freeMiningSessionStart" to now,
+            "baselineGridBalance" to baselineGrid,
+            "sessionEndTime" to end,
             "miningEndTime" to end,
+            "freeMiningSessionEnd" to end,
             "lastSyncTimestamp" to now,
             "lastUpdatedTimestamp" to now
         )

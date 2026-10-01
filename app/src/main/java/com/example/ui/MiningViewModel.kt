@@ -58,7 +58,7 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             userState.collect { state ->
                 minerBalance.value = state.minerBalanceUsdt
-                gridBalance.value = state.gridBalance
+                gridBalance.value = maxOf(state.gridBalance, gridBalance.value)
                 deployedNodesCount.value = state.userRigs.size
                 isMiningActive.value = state.isFreeMiningActive
                 sessionEndTime.value = state.freeMiningSessionEnd
@@ -398,14 +398,31 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
                 docRef.get().addOnSuccessListener { snapshot ->
                     if (snapshot != null && snapshot.exists()) {
                         val usdt = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble() ?: 3000.0
-                        val grid = (snapshot.get("gridBalance") as? Number)?.toDouble() ?: 0.0
+                        val cloudGrid = (snapshot.get("gridBalance") as? Number)?.toDouble() ?: 0.0
+                        val cloudBaseline = (snapshot.get("baselineGridBalance") as? Number)?.toDouble() ?: cloudGrid
+                        val cloudStartTime = (snapshot.get("miningStartTimeMillis") as? Number)?.toLong()
+                            ?: (snapshot.get("freeMiningSessionStart") as? Number)?.toLong() ?: 0L
+                        val cloudEndTime = (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong()
+                            ?: (snapshot.get("sessionEndTime") as? Number)?.toLong() ?: 0L
+                        val isMining = (snapshot.getBoolean("isFreeMiningActive") ?: snapshot.getBoolean("isMiningActive") ?: false)
                         val nodes = (snapshot.get("deployedNodesCount") as? Number)?.toInt() ?: 0
+
+                        val now = System.currentTimeMillis()
+                        val accruedGrid = if (isMining && now < cloudEndTime && cloudStartTime > 0) {
+                            val elapsedSeconds = ((now - cloudStartTime) / 1000.0).coerceAtLeast(0.0)
+                            val hashrate = userState.value.aggregateFreeHashrateGh.coerceAtLeast(2.0)
+                            val tokensPerSec = (hashrate / 10.0) * (MiningRepository.TARGET_DAILY_GRID / 86400.0)
+                            cloudBaseline + (elapsedSeconds * tokensPerSec)
+                        } else {
+                            cloudGrid
+                        }
+                        val finalGrid = maxOf(accruedGrid, _gridBalance.value, cloudGrid)
 
                         viewModelScope.launch(Dispatchers.Main) {
                             _minerBalance.value = usdt
-                            _gridBalance.value = grid
+                            _gridBalance.value = finalGrid
                             _deployedNodesCount.value = nodes
-                            repository.setLocalBalance(usdt, grid)
+                            repository.setLocalBalance(usdt, finalGrid)
                         }
                     }
                     repository.attachUserDocumentRealTimeListener(key)
@@ -418,6 +435,22 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
                 android.util.Log.e("SYNC_SILENT", "Exception during silent sync", e)
             }
         }
+    }
+
+    fun onAppResumed() {
+        val now = System.currentTimeMillis()
+        val recomputedGrid = repository.computeAccruedGridBalance(now)
+        val finalGrid = maxOf(recomputedGrid, _gridBalance.value)
+        _gridBalance.value = finalGrid
+        repository.setLocalBalance(_minerBalance.value, finalGrid)
+    }
+
+    fun onAppPaused() {
+        val now = System.currentTimeMillis()
+        val recomputedGrid = repository.computeAccruedGridBalance(now)
+        val finalGrid = maxOf(recomputedGrid, _gridBalance.value)
+        _gridBalance.value = finalGrid
+        repository.saveGridBalanceOnPause(finalGrid)
     }
 
     fun handleLoginOrRestore(inputKey: String) {

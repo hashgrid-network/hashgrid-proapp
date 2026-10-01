@@ -144,12 +144,18 @@ class MainActivity : AppCompatActivity() {
             Log.w("MainActivity", "Keyguard check note: ${e.message}")
         }
         viewModel.setUserOnline(true)
+        viewModel.onAppResumed()
     }
 
     override fun onPause() {
         super.onPause()
         viewModel.setUserOnline(false)
-        viewModel.syncMinedTokens()
+        viewModel.onAppPaused()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        viewModel.onAppPaused()
     }
 
     override fun onDestroy() {
@@ -179,6 +185,21 @@ fun MainApp(
         NotificationHelper.createNotificationChannels(context)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> viewModel.onAppResumed()
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE, androidx.lifecycle.Lifecycle.Event.ON_STOP -> viewModel.onAppPaused()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
     val cryptoPrices by viewModel.cryptoPrices.collectAsStateWithLifecycle()

@@ -22,17 +22,18 @@ object ReferralConstants {
     }
 
     fun getReferralUrl(referralCode: String): String {
-        val shortCode = getShortReferralCode(referralCode)
-        return "$REFERRAL_BASE_URL$shortCode"
+        val code = referralCode.trim().ifEmpty { "HG-7788" }
+        return "$REFERRAL_BASE_URL$code"
     }
 
     fun getReferralPreview(referralCode: String): String {
-        val shortCode = getShortReferralCode(referralCode)
-        return "hashgrid.online/?ref=$shortCode"
+        val code = referralCode.trim().ifEmpty { "HG-7788" }
+        return "hashgrid.online/?ref=$code"
     }
 
     fun getShareMessage(referralCode: String): String {
-        return "🚀 Join HashGrid Pro and activate your Web3 cloud mining node! Use my referral link to get a bonus hashrate boost:\n${getReferralUrl(referralCode)}"
+        val code = referralCode.trim().ifEmpty { "HG-7788" }
+        return "🚀 Join HashGrid Pro and activate your Web3 cloud mining node! Use my referral link to get a bonus hashrate boost:\nhttps://hashgrid.online/?ref=$code"
     }
 
     fun shareReferralLink(context: Context, referralCode: String) {
@@ -51,8 +52,8 @@ object ReferralConstants {
     fun copyReferralLink(context: Context, referralCode: String) {
         try {
             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            val fullUrl = getReferralUrl(referralCode)
-            cm?.setPrimaryClip(ClipData.newPlainText("HashGrid Referral Link", fullUrl))
+            val message = getShareMessage(referralCode)
+            cm?.setPrimaryClip(ClipData.newPlainText("HashGrid Referral Link", message))
             Toast.makeText(context, "Referral link copied to clipboard!", Toast.LENGTH_SHORT).show()
         } catch (e: Throwable) {
             Toast.makeText(context, "Could not copy: ${e.message}", Toast.LENGTH_SHORT).show()
