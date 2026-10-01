@@ -64,6 +64,14 @@ class MiningRepository(context: Context) {
     val _hardwareNodes = deployedRigs
     val deployedNodesCount = MutableStateFlow(0)
     val _deployedNodesCount = deployedNodesCount
+    val isMiningActive = MutableStateFlow(false)
+    val _isMiningActive = isMiningActive
+    val freeMiningEndTime = MutableStateFlow(0L)
+    val _freeMiningEndTime = freeMiningEndTime
+    val gridBalance = MutableStateFlow(0.0)
+    val _gridBalance = gridBalance
+    val minerBalance = MutableStateFlow(0.0)
+    val _minerBalance = minerBalance
     private var snapshotRegistration: ListenerRegistration? = null
 
     fun getActiveKey(): String? = vaultPrefs.getString("ACTIVE_SECRET_KEY", null) ?: securityPreferences.getActiveUserKey()
@@ -89,56 +97,105 @@ class MiningRepository(context: Context) {
         if (cleanKey.isBlank()) return
         setActiveKey(cleanKey)
 
-        // Instantly navigate: initialize activeAccount non-null right away so UI navigates with zero delay
-        if (activeAccount.value?.secretKey != cleanKey) {
-            val isSuperAdmin = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
-            val immediateAcc = UserCloudAccount(
-                secretKey = cleanKey,
-                isAdmin = isSuperAdmin,
-                minerBalanceUsdt = prefs.getFloat("miner_balance", 0f).toDouble(),
-                gridBalance = prefs.getFloat("grid_balance", 0f).toDouble(),
-                aggregateHashpowerGh = 2.0,
-                lastSyncTimestamp = System.currentTimeMillis()
-            )
-            activeAccount.value = immediateAcc
-            _userState.value = immediateAcc.toUserMiningState()
-        }
-
         val docRef = firestore.collection("users").document(cleanKey)
+
+        // ATOMIC RESTORE ON REINSTALL:
+        // Fetch the document via .get(). DO NOT call .set() with default zeroes.
+        docRef.get().addOnSuccessListener { snapshot ->
+            if (snapshot != null && snapshot.exists()) {
+                val now = System.currentTimeMillis()
+                val usdt = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble() ?: 0.0
+                val grid = (snapshot.get("gridBalance") as? Number)?.toDouble() ?: 0.0
+                val isAdmin = snapshot.getBoolean("isAdmin") ?: (cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey))
+                val endTime = (snapshot.get("freeMiningEndTime") as? Number)?.toLong()
+                    ?: (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong()
+                    ?: (snapshot.get("sessionEndTime") as? Number)?.toLong()
+                    ?: (snapshot.get("miningEndTime") as? Number)?.toLong()
+                    ?: 0L
+
+                val isFreeMining = if (endTime > now) {
+                    _isMiningActive.value = true
+                    _freeMiningEndTime.value = endTime
+                    true
+                } else if (endTime > 0L && now >= endTime) {
+                    _isMiningActive.value = false
+                    false
+                } else {
+                    snapshot.getBoolean("isFreeMiningActive") ?: false
+                }
+
+                val rigs = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>)
+                    ?: (snapshot.get("deployedRigs") as? List<Map<String, Any>>)
+                    ?: emptyList()
+
+                _deployedRigs.value = rigs
+                _deployedNodesCount.value = rigs.size
+                _minerBalance.value = usdt
+                _gridBalance.value = grid
+
+                val restoredAcc = UserCloudAccount(
+                    secretKey = cleanKey,
+                    isAdmin = isAdmin,
+                    minerBalanceUsdt = usdt,
+                    gridBalance = grid,
+                    isFreeMiningActive = isFreeMining,
+                    freeMiningStartTime = (snapshot.get("freeMiningStartTime") as? Number)?.toLong()
+                        ?: (snapshot.get("freeMiningSessionStart") as? Number)?.toLong() ?: 0L,
+                    freeMiningEndTime = endTime,
+                    aggregateHashpowerGh = (snapshot.get("aggregateHashpowerGh") as? Number)?.toDouble() ?: 2.0,
+                    lastSyncTimestamp = now,
+                    hardwareNodes = rigs
+                )
+
+                activeAccount.value = restoredAcc
+                _userState.value = restoredAcc.toUserMiningState()
+                loadStateIntoApp(usdt, grid, isFreeMining, endTime, rigs)
+                setLocalBalance(usdt, grid)
+            } else {
+                // If not found in memory yet, allow navigation
+                if (activeAccount.value?.secretKey != cleanKey) {
+                    val isSuperAdmin = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
+                    val fallbackAcc = UserCloudAccount(
+                        secretKey = cleanKey,
+                        isAdmin = isSuperAdmin,
+                        minerBalanceUsdt = prefs.getFloat("miner_balance", 0f).toDouble(),
+                        gridBalance = prefs.getFloat("grid_balance", 0f).toDouble(),
+                        aggregateHashpowerGh = 2.0,
+                        lastSyncTimestamp = System.currentTimeMillis()
+                    )
+                    activeAccount.value = fallbackAcc
+                    _userState.value = fallbackAcc.toUserMiningState()
+                }
+            }
+        }
 
         snapshotRegistration?.remove()
         snapshotRegistration = docRef.addSnapshotListener { snapshot, error ->
-            if (error != null || snapshot == null) return@addSnapshotListener
+            if (error != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
 
             val now = System.currentTimeMillis()
-
-            if (!snapshot.exists()) {
-                // Initialize clean account if document does not exist in Firestore
-                val isSuperAdmin = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
-                val newAcc = UserCloudAccount(
-                    secretKey = cleanKey,
-                    isAdmin = isSuperAdmin,
-                    minerBalanceUsdt = if (isSuperAdmin) 3000.0 else 0.0,
-                    gridBalance = 0.0,
-                    aggregateHashpowerGh = 2.0,
-                    lastSyncTimestamp = now,
-                    hardwareNodes = emptyList()
-                )
-                docRef.set(newAcc.toMap(), SetOptions.merge())
-                activeAccount.value = newAcc
-                _userState.value = newAcc.toUserMiningState()
-                _deployedRigs.value = emptyList()
-                _deployedNodesCount.value = 0
-                return@addSnapshotListener
-            }
 
             // Document exists: DIRECTLY BIND TO EXISTING FIRESTORE DOCUMENT WITHOUT OVERWRITING
             val usdt = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble() ?: 0.0
             val grid = (snapshot.get("gridBalance") as? Number)?.toDouble() ?: 0.0
             val isAdmin = (snapshot.getBoolean("isAdmin")) ?: (cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey))
-            val isFreeMining = snapshot.getBoolean("isFreeMiningActive") ?: false
-            val miningEnd = (snapshot.get("freeMiningEndTime") as? Number)?.toLong()
-                ?: (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong() ?: 0L
+            
+            val endTime = (snapshot.get("freeMiningEndTime") as? Number)?.toLong()
+                ?: (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong()
+                ?: 0L
+
+            // Only mark expired if endTime is genuinely in the past AND was previously set (> 0)
+            val isFreeMining: Boolean
+            if (endTime > now) {
+                _isMiningActive.value = true
+                _freeMiningEndTime.value = endTime
+                isFreeMining = true
+            } else if (endTime > 0L && now >= endTime) {
+                _isMiningActive.value = false
+                isFreeMining = false
+            } else {
+                isFreeMining = snapshot.getBoolean("isFreeMiningActive") ?: _isMiningActive.value
+            }
 
             // Read hardwareNodes exactly as specified
             val rigs = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>)
@@ -155,7 +212,7 @@ class MiningRepository(context: Context) {
                 isFreeMiningActive = isFreeMining,
                 freeMiningStartTime = (snapshot.get("freeMiningStartTime") as? Number)?.toLong()
                     ?: (snapshot.get("freeMiningSessionStart") as? Number)?.toLong() ?: 0L,
-                freeMiningEndTime = miningEnd,
+                freeMiningEndTime = endTime,
                 aggregateHashpowerGh = (snapshot.get("aggregateHashpowerGh") as? Number)?.toDouble() ?: 2.0,
                 lastSyncTimestamp = now,
                 hardwareNodes = rigs
@@ -215,12 +272,20 @@ class MiningRepository(context: Context) {
     fun startFreeMiningCore(secretKey: String) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
         val now = System.currentTimeMillis()
+        val endTime = now + 86400000L // Full 24 Hours
         val docRef = firestore.collection("users").document(cleanKey)
+
+        _isMiningActive.value = true
+        _freeMiningEndTime.value = endTime
+
         docRef.update(
             mapOf(
                 "isFreeMiningActive" to true,
                 "freeMiningStartTime" to now,
-                "freeMiningEndTime" to now + 86400000L,
+                "freeMiningEndTime" to endTime,
+                "freeMiningSessionEnd" to endTime,
+                "sessionEndTime" to endTime,
+                "miningEndTime" to endTime,
                 "lastSyncTimestamp" to now
             )
         ).addOnFailureListener {
@@ -228,8 +293,48 @@ class MiningRepository(context: Context) {
                 mapOf(
                     "isFreeMiningActive" to true,
                     "freeMiningStartTime" to now,
-                    "freeMiningEndTime" to now + 86400000L,
+                    "freeMiningEndTime" to endTime,
+                    "freeMiningSessionEnd" to endTime,
+                    "sessionEndTime" to endTime,
+                    "miningEndTime" to endTime,
                     "lastSyncTimestamp" to now
+                ), SetOptions.merge()
+            )
+        }
+
+        val current = _userState.value
+        val updated = current.copy(
+            isFreeMiningActive = true,
+            freeMiningSessionStart = now,
+            freeMiningSessionEnd = endTime,
+            lastYieldTickTimestamp = now
+        )
+        _userState.value = updated
+        prefs.edit()
+            .putLong("mining_start_time_millis", now)
+            .putLong("free_session_start", now)
+            .putLong("free_session_end", endTime)
+            .putBoolean("free_session_active", true)
+            .apply()
+    }
+
+    // 4. ATOMIC LUCKY WHEEL REWARDS
+    fun claimWheelReward(key: String, rewardGrid: Double) {
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(key)
+        _gridBalance.value += rewardGrid
+        val current = _userState.value
+        val updated = current.copy(gridBalance = current.gridBalance + rewardGrid)
+        _userState.value = updated
+        prefs.edit().putFloat("grid_balance", updated.gridBalance.toFloat()).apply()
+
+        firestore.collection("users").document(cleanKey).update(
+            "gridBalance", com.google.firebase.firestore.FieldValue.increment(rewardGrid),
+            "lastSyncTimestamp", System.currentTimeMillis()
+        ).addOnFailureListener {
+            firestore.collection("users").document(cleanKey).set(
+                mapOf(
+                    "gridBalance" to _userState.value.gridBalance,
+                    "lastSyncTimestamp" to System.currentTimeMillis()
                 ), SetOptions.merge()
             )
         }
@@ -470,15 +575,28 @@ class MiningRepository(context: Context) {
                             ?: (snapshot.get("freeMiningSessionStart") as? Number)?.toLong()
                             ?: (snapshot.get("miningStartTime") as? Number)?.toLong()
                             ?: current.freeMiningSessionStart
-                        val sessionEnd = (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong()
+                        val endTime = (snapshot.get("freeMiningEndTime") as? Number)?.toLong()
+                            ?: (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong()
                             ?: (snapshot.get("sessionEndTime") as? Number)?.toLong()
                             ?: (snapshot.get("miningEndTime") as? Number)?.toLong()
                             ?: current.freeMiningSessionEnd
-                        val isMining = (snapshot.getBoolean("isFreeMiningActive")
-                            ?: snapshot.getBoolean("isMiningActive")
-                            ?: current.isFreeMiningActive) && (System.currentTimeMillis() < sessionEnd)
-
                         val nowTs = System.currentTimeMillis()
+
+                        // Only mark expired if endTime is genuinely in the past AND was previously set (> 0)
+                        val isMining: Boolean
+                        if (endTime > nowTs) {
+                            _isMiningActive.value = true
+                            _freeMiningEndTime.value = endTime
+                            isMining = true
+                        } else if (endTime > 0L && nowTs >= endTime) {
+                            _isMiningActive.value = false
+                            isMining = false
+                        } else {
+                            isMining = (snapshot.getBoolean("isFreeMiningActive")
+                                ?: snapshot.getBoolean("isMiningActive")
+                                ?: current.isFreeMiningActive)
+                        }
+
                         val sessionMined = if (isMining && sessionStart > 0 && nowTs > sessionStart) {
                             val elapsedSeconds = ((nowTs - sessionStart) / 1000.0).coerceAtLeast(0.0)
                             val hashrate = current.aggregateFreeHashrateGh.coerceAtLeast(2.0)
@@ -565,9 +683,9 @@ class MiningRepository(context: Context) {
                             secretKey = cleanKey,
                             gridBalance = effectiveGrid,
                             minerBalanceUsdt = usdt,
-                            isFreeMiningActive = isMining && (System.currentTimeMillis() < sessionEnd),
+                            isFreeMiningActive = isMining,
                             freeMiningSessionStart = sessionStart,
-                            freeMiningSessionEnd = sessionEnd,
+                            freeMiningSessionEnd = endTime,
                             userRigs = if (parsedRigs.isNotEmpty()) parsedRigs else current.userRigs,
                             transactions = if (parsedTxs.isNotEmpty()) parsedTxs else current.transactions,
                             isAdmin = isMaster,
@@ -578,7 +696,7 @@ class MiningRepository(context: Context) {
                             .putFloat("grid_balance", effectiveGrid.toFloat())
                             .putFloat("miner_balance", usdt.toFloat())
                             .putLong("free_session_start", sessionStart)
-                            .putLong("free_session_end", sessionEnd)
+                            .putLong("free_session_end", endTime)
                             .putLong("mining_start_time_millis", sessionStart)
                             .putFloat("baseline_grid_balance", cloudBaseline.toFloat())
                             .putBoolean("free_session_active", isMining)
@@ -957,47 +1075,66 @@ class MiningRepository(context: Context) {
         val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
         val docRef = db.collection("users").document(cleanKey)
 
+        // ATOMIC RESTORE ON REINSTALL:
+        // Fetch the document via .get(). DO NOT call .set() with default zeroes.
         docRef.get().addOnSuccessListener { snapshot ->
-            val now = System.currentTimeMillis()
-
-            if (!snapshot.exists()) {
-                // New User Setup if document does not exist
-                val isAdminKey = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
-                val initialUsdt = if (isAdminKey) 3000.0 else 0.0
-                val initialGrid = if (isAdminKey) 5000.0 else 0.0
-                val initialAccount = UserCloudAccount(
-                    secretKey = cleanKey,
-                    isAdmin = isAdminKey,
-                    minerBalanceUsdt = initialUsdt,
-                    gridBalance = initialGrid,
-                    isFreeMiningActive = false,
-                    lastSyncTimestamp = now,
-                    hardwareNodes = emptyList()
-                )
-                docRef.set(initialAccount.toMap(), com.google.firebase.firestore.SetOptions.merge())
-                _deployedRigs.value = emptyList()
-                _deployedNodesCount.value = 0
-                loadStateIntoApp(initialUsdt, initialGrid, false, 0L, emptyList())
+            if (snapshot == null || !snapshot.exists()) {
+                // DO NOT call .set() with default zeroes
                 attachUserDocumentRealTimeListener(cleanKey)
                 return@addOnSuccessListener
             }
 
+            val now = System.currentTimeMillis()
+
             // Document exists: DIRECTLY BIND TO EXISTING FIRESTORE DOCUMENT WITHOUT OVERWRITING
             val usdtBalance = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble() ?: 0.0
             val gridBalance = (snapshot.get("gridBalance") as? Number)?.toDouble() ?: 0.0
-            val isFreeMining = snapshot.getBoolean("isFreeMiningActive") ?: false
+            val isAdmin = snapshot.getBoolean("isAdmin") ?: (cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey))
             val miningEndTime = (snapshot.get("freeMiningEndTime") as? Number)?.toLong()
-                ?: (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong() ?: 0L
+                ?: (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong()
+                ?: (snapshot.get("sessionEndTime") as? Number)?.toLong()
+                ?: (snapshot.get("miningEndTime") as? Number)?.toLong() ?: 0L
+
+            val isFreeMining = if (miningEndTime > now) {
+                _isMiningActive.value = true
+                _freeMiningEndTime.value = miningEndTime
+                true
+            } else if (miningEndTime > 0L && now >= miningEndTime) {
+                _isMiningActive.value = false
+                false
+            } else {
+                snapshot.getBoolean("isFreeMiningActive") ?: false
+            }
 
             // Read hardwareNodes exactly as specified
             val rigs = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>)
                 ?: (snapshot.get("deployedRigs") as? List<Map<String, Any>>)
                 ?: emptyList()
+
             _deployedRigs.value = rigs
             _deployedNodesCount.value = rigs.size
+            _minerBalance.value = usdtBalance
+            _gridBalance.value = gridBalance
+
+            val cloudAcc = UserCloudAccount(
+                secretKey = cleanKey,
+                isAdmin = isAdmin,
+                minerBalanceUsdt = usdtBalance,
+                gridBalance = gridBalance,
+                isFreeMiningActive = isFreeMining,
+                freeMiningStartTime = (snapshot.get("freeMiningStartTime") as? Number)?.toLong()
+                    ?: (snapshot.get("freeMiningSessionStart") as? Number)?.toLong() ?: 0L,
+                freeMiningEndTime = miningEndTime,
+                aggregateHashpowerGh = (snapshot.get("aggregateHashpowerGh") as? Number)?.toDouble() ?: 2.0,
+                lastSyncTimestamp = now,
+                hardwareNodes = rigs
+            )
+            activeAccount.value = cloudAcc
+            _userState.value = cloudAcc.toUserMiningState()
 
             // Update UI StateFlows directly from Firestore
             loadStateIntoApp(usdtBalance, gridBalance, isFreeMining, miningEndTime, rigs)
+            setLocalBalance(usdtBalance, gridBalance)
             attachUserDocumentRealTimeListener(cleanKey)
         }.addOnFailureListener { e ->
             Log.e("RESTORE_ERR", "Direct cloud bind fallback", e)
@@ -1407,6 +1544,9 @@ class MiningRepository(context: Context) {
         val activeKey = current.secretKey.ifBlank { securityPreferences.getActiveUserKey() ?: "HG-ADM9-7788-5544-0001" }
         val baselineGrid = current.gridBalance
 
+        _isMiningActive.value = true
+        _freeMiningEndTime.value = end
+
         prefs.edit()
             .putLong("mining_start_time_millis", now)
             .putFloat("baseline_grid_balance", baselineGrid.toFloat())
@@ -1429,6 +1569,8 @@ class MiningRepository(context: Context) {
         val updateMap = mapOf(
             "isFreeMiningActive" to true,
             "isMiningActive" to true,
+            "freeMiningStartTime" to now,
+            "freeMiningEndTime" to end,
             "miningStartTimeMillis" to now,
             "miningStartTime" to now,
             "freeMiningSessionStart" to now,
@@ -1781,6 +1923,34 @@ class MiningRepository(context: Context) {
                 )
             )
         }
+        val activeKey = current.secretKey.ifBlank { getActiveKey() ?: "HG-ADM9-7788-5544-0001" }
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(activeKey)
+        if (cleanKey.isNotBlank()) {
+            if (sector.type == SpinRewardType.GRID_TOKENS && sector.value > 0) {
+                _gridBalance.value = newGridBal
+                firestore.collection("users").document(cleanKey).update(
+                    "gridBalance", com.google.firebase.firestore.FieldValue.increment(sector.value),
+                    "lastSyncTimestamp", now
+                ).addOnFailureListener {
+                    firestore.collection("users").document(cleanKey).set(
+                        mapOf("gridBalance" to newGridBal, "lastSyncTimestamp" to now),
+                        SetOptions.merge()
+                    )
+                }
+            } else if (sector.type == SpinRewardType.USDT && sector.value > 0) {
+                _minerBalance.value = newMinerBal
+                firestore.collection("users").document(cleanKey).update(
+                    "minerBalanceUsdt", com.google.firebase.firestore.FieldValue.increment(sector.value),
+                    "lastSyncTimestamp", now
+                ).addOnFailureListener {
+                    firestore.collection("users").document(cleanKey).set(
+                        mapOf("minerBalanceUsdt" to newMinerBal, "lastSyncTimestamp" to now),
+                        SetOptions.merge()
+                    )
+                }
+            }
+        }
+
         syncToCloud()
         return record
     }
