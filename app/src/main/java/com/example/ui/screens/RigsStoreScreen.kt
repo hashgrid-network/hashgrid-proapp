@@ -23,12 +23,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.example.data.model.DefaultRigs
-import com.example.data.model.RigCatalogItem
-import com.example.data.model.RigStatus
-import com.example.data.model.UserMiningState
+import com.example.data.model.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import com.example.ui.MiningViewModel
 import com.example.ui.components.GlassCard
 import com.example.ui.components.GlowingBorderCard
+import com.example.ui.components.NodePurchaseDialog
 import com.example.ui.theme.*
 
 @Composable
@@ -37,12 +37,33 @@ fun RigsStoreScreen(
     onBuyRig: (RigCatalogItem) -> Unit,
     onPayWithNowPayments: (RigCatalogItem, payCurrency: String) -> Unit,
     onOpenDeposit: () -> Unit,
+    viewModel: MiningViewModel? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedSection by remember { mutableIntStateOf(0) }
     var hardwareSubFilter by remember { mutableIntStateOf(0) }
     var rigToBuy by remember { mutableStateOf<RigCatalogItem?>(null) }
     var selectedCryptoPayment by remember { mutableStateOf("usdtbsc") }
+
+    val accountState by (viewModel?.accountState ?: remember { MutableStateFlow(null) }).collectAsState()
+
+    val allDeployedNodes: List<HardwareNode> = remember(accountState, userState) {
+        if (accountState?.deployedRigs?.isNotEmpty() == true) {
+            accountState!!.deployedRigs.map { it.toHardwareNode() }
+        } else {
+            userState.userRigs.map { rig ->
+                HardwareNode(
+                    id = rig.id,
+                    name = rig.name,
+                    hashrateGh = rig.hashrateGh,
+                    costUsdt = rig.priceUsdt,
+                    dailyYieldUsdt = (rig.priceUsdt * 0.15) / 30.0,
+                    deployedTimestamp = rig.purchaseTimestamp,
+                    totalDays = rig.durationDays
+                )
+            }
+        }
+    }
 
     val cryptoCurrencies = listOf(
         "usdtbsc" to "USDT (BSC)",
@@ -71,7 +92,8 @@ fun RigsStoreScreen(
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                listOf("Node Catalog", "My Hardware (${userState.userRigs.count { it.status == RigStatus.ACTIVE }})").forEachIndexed { idx, title ->
+                val activeNodesCount = allDeployedNodes.count { it.calculateRemainingDays() > 0 }
+                listOf("Node Catalog", "My Hardware ($activeNodesCount)").forEachIndexed { idx, title ->
                     val isSel = selectedSection == idx
                     Box(
                         modifier = Modifier
@@ -307,11 +329,13 @@ fun RigsStoreScreen(
                 }
             }
 
-            val filteredRigs = userState.userRigs.filter {
-                if (hardwareSubFilter == 0) it.status == RigStatus.ACTIVE else it.status == RigStatus.COMPLETED
+            val now = System.currentTimeMillis()
+            val filteredNodes = allDeployedNodes.filter { node ->
+                val remaining = node.calculateRemainingDays(now)
+                if (hardwareSubFilter == 0) remaining > 0 else remaining == 0
             }
 
-            if (filteredRigs.isEmpty()) {
+            if (filteredNodes.isEmpty()) {
                 item {
                     GlassCard(modifier = Modifier.fillMaxWidth()) {
                         Column(
@@ -335,10 +359,14 @@ fun RigsStoreScreen(
                     }
                 }
             } else {
-                items(filteredRigs) { rig ->
+                items(filteredNodes) { rig ->
+                    val remainingDays = rig.calculateRemainingDays(now)
+                    val progress = rig.calculateProgressRatio(now)
+                    val isExpired = remainingDays == 0
+
                     GlassCard(
                         modifier = Modifier.fillMaxWidth(),
-                        borderColor = if (rig.status == RigStatus.ACTIVE) EmeraldAccent else Color.Gray.copy(alpha = 0.3f)
+                        borderColor = if (!isExpired) EmeraldAccent else Color.Gray.copy(alpha = 0.3f)
                     ) {
                         Column(
                             modifier = Modifier
@@ -352,10 +380,16 @@ fun RigsStoreScreen(
                             ) {
                                 Column {
                                     Text(rig.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary))
-                                    Text("${rig.hashrateGh} GH/s • Status: ${rig.status.name}", style = MaterialTheme.typography.labelSmall.copy(color = EmeraldGlow))
+                                    Text(
+                                        "${rig.hashrateGh} GH/s • Remaining: $remainingDays / ${rig.totalDays} Days",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = if (!isExpired) EmeraldGlow else CrimsonError,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
                                 }
                                 Text(
-                                    "$${rig.priceUsdt.toInt()} USDT",
+                                    "$${rig.costUsdt.toInt()} USDT",
                                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = GoldLight)
                                 )
                             }
@@ -363,12 +397,12 @@ fun RigsStoreScreen(
                             Spacer(modifier = Modifier.height(10.dp))
 
                             LinearProgressIndicator(
-                                progress = { rig.progressRatio() },
+                                progress = { progress },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(6.dp)
                                     .clip(RoundedCornerShape(3.dp)),
-                                color = EmeraldAccent,
+                                color = if (!isExpired) EmeraldAccent else CrimsonError,
                                 trackColor = DarkNavySurface
                             )
 
@@ -378,8 +412,17 @@ fun RigsStoreScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("${rig.daysRemaining()} Days Remaining", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted))
-                                Text("Received: +$${String.format("%.2f", rig.totalReceivedUsdt)} USDT", style = MaterialTheme.typography.labelSmall.copy(color = TextEmerald, fontWeight = FontWeight.Bold))
+                                Text(
+                                    if (isExpired) "0 Days Remaining (Expired)" else "$remainingDays Days Remaining (${rig.totalDays}d Contract)",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = if (isExpired) CrimsonError else TextMuted,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                )
+                                Text(
+                                    "Monthly: +$${String.format("%.2f", rig.costUsdt * 0.15)} USDT",
+                                    style = MaterialTheme.typography.labelSmall.copy(color = TextEmerald, fontWeight = FontWeight.Bold)
+                                )
                             }
                         }
                     }
@@ -388,142 +431,35 @@ fun RigsStoreScreen(
         }
     }
 
-    // Purchase Confirmation Modal
+    // Custom AlertDialog for Hardware Node Purchase Confirmation
     if (rigToBuy != null) {
         val rig = rigToBuy!!
-        val hasEnoughBalance = userState.minerBalanceUsdt >= rig.priceUsdt
-
-        Dialog(onDismissRequest = { rigToBuy = null }) {
-            GlassCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(8.dp),
-                borderColor = GoldPrimary
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "DEPLOY HARDWARE NODE",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = TextGold)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = "${rig.name} (${rig.hashrateGh} GH/s)",
-                        style = MaterialTheme.typography.headlineSmall.copy(color = TextPrimary, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(DarkNavySurface)
-                            .padding(12.dp)
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Node Price:", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
-                                Text("$${rig.priceUsdt.toInt()}.00 USDT", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = GoldLight))
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Your Miner Balance:", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
-                                Text("$${String.format("%.2f", userState.minerBalanceUsdt)} USDT", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = if (hasEnoughBalance) TextEmerald else CrimsonError))
-                            }
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Monthly Yield (~15%):", style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary))
-                                Text("+$${String.format("%.2f", rig.priceUsdt * 0.15)} USDT / mo", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = EmeraldGlow))
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Option A: Pay via Wallet Balance
-                    if (hasEnoughBalance) {
-                        Button(
-                            onClick = {
-                                onBuyRig(rig)
-                                rigToBuy = null
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(44.dp)
-                                .testTag("confirm_buy_rig_button"),
-                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text("PAY WITH MINER BALANCE", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                    }
-
-                    // Option B: Pay via NOWPayments Crypto Gateway
-                    Text(
-                        text = "Or Pay Directly with Crypto (NOWPayments)",
-                        style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary, fontWeight = FontWeight.Bold)
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        cryptoCurrencies.take(4).forEach { (code, label) ->
-                            val isSel = selectedCryptoPayment == code
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(if (isSel) GoldPrimary else DarkNavySurface)
-                                    .clickable { selectedCryptoPayment = code }
-                                    .padding(vertical = 6.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = label,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (isSel) ObsidianBg else TextSecondary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 9.5.sp
-                                    )
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Button(
-                        onClick = {
-                            val targetRig = rig
-                            rigToBuy = null
-                            onPayWithNowPayments(targetRig, selectedCryptoPayment)
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
-                            .testTag("nowpayments_buy_rig_btn"),
-                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldAccent),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = ObsidianBg, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("CRYPTO INVOICE (${selectedCryptoPayment.uppercase()})", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    TextButton(onClick = { rigToBuy = null }) {
-                        Text("Cancel", color = TextSecondary)
-                    }
-                }
-            }
+        if (viewModel != null) {
+            NodePurchaseDialog(
+                rig = rig,
+                viewModel = viewModel,
+                onConfirm = {
+                    onBuyRig(rig)
+                    rigToBuy = null
+                },
+                onDismiss = { rigToBuy = null },
+                onOpenDeposit = onOpenDeposit
+            )
+        } else {
+            NodePurchaseDialog(
+                nodeName = rig.name,
+                cost = rig.priceUsdt,
+                dailyYield = rig.dailyYieldUsdt,
+                hashrateGh = rig.hashrateGh,
+                durationDays = rig.durationDays,
+                currentMinerBalance = userState.minerBalanceUsdt,
+                onConfirm = {
+                    onBuyRig(rig)
+                    rigToBuy = null
+                },
+                onDismiss = { rigToBuy = null },
+                onOpenDeposit = onOpenDeposit
+            )
         }
     }
 }

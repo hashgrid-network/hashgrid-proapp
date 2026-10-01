@@ -26,10 +26,22 @@ class RigsStoreViewModel(application: Application) : AndroidViewModel(applicatio
             Log.e("SYNC", "No active user key found!")
             return
         }
-        val rigMap = hashMapOf(
-            "nodeId" to "NODE-${System.currentTimeMillis().toString().takeLast(6)}",
+        val now = System.currentTimeMillis()
+        val priceUsdt = selectedRig.priceUsdt.toDouble()
+        val dailyYieldUsdt = (priceUsdt * 0.15) / 30.0
+
+        val deployedRigMap = hashMapOf(
             "name" to selectedRig.name,
-            "priceUsdt" to selectedRig.priceUsdt.toDouble(),
+            "costUsdt" to priceUsdt,
+            "dailyYieldUsdt" to dailyYieldUsdt,
+            "hashrateGh" to selectedRig.hashrateGh.toDouble(),
+            "deployedTimestamp" to now,
+            "totalDays" to 200
+        )
+        val rigMap = hashMapOf(
+            "nodeId" to "NODE-${now.toString().takeLast(6)}",
+            "name" to selectedRig.name,
+            "priceUsdt" to priceUsdt,
             "hashrateGh" to selectedRig.hashrateGh.toDouble(),
             "status" to "ACTIVE",
             "daysRemaining" to 200,
@@ -37,9 +49,11 @@ class RigsStoreViewModel(application: Application) : AndroidViewModel(applicatio
         )
         FirebaseFirestore.getInstance().collection("users").document(key)
             .update(
+                "deployedRigs", FieldValue.arrayUnion(deployedRigMap),
                 "hardwareNodes", FieldValue.arrayUnion(rigMap),
-                "minerBalanceUsdt", FieldValue.increment(-selectedRig.priceUsdt.toDouble()),
-                "dailySpentUsdt", FieldValue.increment(selectedRig.priceUsdt.toDouble())
+                "minerBalanceUsdt", FieldValue.increment(-priceUsdt),
+                "dailySpentUsdt", FieldValue.increment(priceUsdt),
+                "lastSyncTimestamp", now
             )
     }
 
@@ -48,26 +62,35 @@ class RigsStoreViewModel(application: Application) : AndroidViewModel(applicatio
             try {
                 val activeKey = sessionManager.getActiveUserKey() ?: "HG-ADM9-7788-5544-0001"
                 val priceUsdt = selectedRig.priceUsdt.toDouble()
-                
-                // Direct Firestore increment/decrement write to ensure absolute lock-step synchronization with cloud state
-                FirebaseFirestore.getInstance().collection("users").document(activeKey)
-                    .update("minerBalanceUsdt", FieldValue.increment(-priceUsdt))
-                    .await()
+                val now = System.currentTimeMillis()
+                val dailyYieldUsdt = (priceUsdt * 0.15) / 30.0
 
+                val deployedRigMap = hashMapOf(
+                    "name" to selectedRig.name,
+                    "costUsdt" to priceUsdt,
+                    "dailyYieldUsdt" to dailyYieldUsdt,
+                    "hashrateGh" to selectedRig.hashrateGh.toDouble(),
+                    "deployedTimestamp" to now,
+                    "totalDays" to 200
+                )
                 val rigMap = hashMapOf(
-                    "nodeId" to "NODE-${System.currentTimeMillis().toString().takeLast(6)}",
+                    "nodeId" to "NODE-${now.toString().takeLast(6)}",
                     "name" to selectedRig.name,
                     "priceUsdt" to priceUsdt,
                     "hashrateGh" to selectedRig.hashrateGh.toDouble(),
                     "status" to "ACTIVE",
                     "daysRemaining" to 200,
-                    "purchaseTimestamp" to System.currentTimeMillis()
+                    "purchaseTimestamp" to now
                 )
 
+                // Direct Firestore increment/decrement write to ensure absolute lock-step synchronization with cloud state
                 FirebaseFirestore.getInstance().collection("users").document(activeKey)
                     .update(
+                        "deployedRigs", FieldValue.arrayUnion(deployedRigMap),
                         "hardwareNodes", FieldValue.arrayUnion(rigMap),
-                        "dailySpentUsdt", FieldValue.increment(priceUsdt)
+                        "minerBalanceUsdt", FieldValue.increment(-priceUsdt),
+                        "dailySpentUsdt", FieldValue.increment(priceUsdt),
+                        "lastSyncTimestamp", now
                     )
                     .await()
 

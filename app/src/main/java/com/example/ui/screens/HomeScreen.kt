@@ -25,9 +25,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.model.RigStatus
-import com.example.data.model.TransactionType
-import com.example.data.model.UserMiningState
+import com.example.data.model.*
 import com.example.ui.AppNavTab
 import com.example.ui.MiningViewModel
 import com.example.ui.components.*
@@ -50,6 +48,7 @@ fun HomeScreen(
     val gridBalance by viewModel.gridBalance.collectAsState()
     val isMiningActive by viewModel.isMiningActive.collectAsState()
     val userState by viewModel.userState.collectAsState()
+    val accountState by viewModel.accountState.collectAsState()
     
     val context = LocalContext.current
     LazyColumn(
@@ -298,6 +297,17 @@ fun HomeScreen(
                     }
                 }
             }
+        }
+
+        // Institutional Node Network Performance - Recharts Hashpower Trend Chart
+        item {
+            val aggregateGh = accountState?.aggregateHashpowerGh ?: userState.totalAggregateHashrateGh
+            val deployedCount = accountState?.deployedRigs?.size ?: userState.userRigs.size
+            HashpowerTrendChart(
+                aggregateHashpowerGh = aggregateGh,
+                deployedRigsCount = deployedCount,
+                networkStatus = if (isMiningActive) "Nominal • 99.8% Efficiency" else "Standby • Ready to Mine"
+            )
         }
 
         // Live Hashrate Overview & Free Mining Quick Status
@@ -676,8 +686,23 @@ fun HomeScreen(
             }
         }
 
-        val activeRigs = userState.userRigs.filter { it.status == RigStatus.ACTIVE }
-        if (activeRigs.isEmpty()) {
+        val displayedNodes: List<HardwareNode> = if (accountState?.deployedRigs?.isNotEmpty() == true) {
+            accountState!!.deployedRigs.map { it.toHardwareNode() }
+        } else {
+            userState.userRigs.filter { it.status == RigStatus.ACTIVE }.map { rig ->
+                HardwareNode(
+                    id = rig.id,
+                    name = rig.name,
+                    hashrateGh = rig.hashrateGh,
+                    costUsdt = rig.priceUsdt,
+                    dailyYieldUsdt = (rig.priceUsdt * 0.15) / 30.0,
+                    deployedTimestamp = rig.purchaseTimestamp,
+                    totalDays = rig.durationDays
+                )
+            }
+        }
+
+        if (displayedNodes.isEmpty()) {
             item {
                 GlassCard(
                     modifier = Modifier
@@ -699,10 +724,15 @@ fun HomeScreen(
                 }
             }
         } else {
-            items(activeRigs.take(3)) { rig ->
+            items(displayedNodes.take(4)) { rig ->
+                val now = System.currentTimeMillis()
+                val remainingDays = rig.calculateRemainingDays(now)
+                val progress = rig.calculateProgressRatio(now)
+                val isExpired = remainingDays == 0
+
                 GlassCard(
                     modifier = Modifier.fillMaxWidth(),
-                    borderColor = GoldPrimary.copy(alpha = 0.3f)
+                    borderColor = if (isExpired) CrimsonError.copy(alpha = 0.4f) else GoldPrimary.copy(alpha = 0.3f)
                 ) {
                     Column(
                         modifier = Modifier
@@ -716,21 +746,30 @@ fun HomeScreen(
                         ) {
                             Column {
                                 Text(rig.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, color = TextPrimary))
-                                Text("${rig.hashrateGh} GH/s • 195-210 Days Matrix", style = MaterialTheme.typography.labelSmall.copy(color = EmeraldGlow))
+                                Text(
+                                    "${rig.hashrateGh} GH/s • Remaining: $remainingDays / ${rig.totalDays} Days",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = if (isExpired) CrimsonError else EmeraldGlow,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                )
                             }
                             Text(
-                                "+$${String.format("%.2f", rig.totalReceivedUsdt)} USDT",
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, color = GoldLight)
+                                if (isExpired) "EXPIRED" else "+$${String.format("%.2f", rig.costUsdt * 0.15)} /mo",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isExpired) CrimsonError else GoldLight
+                                )
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         LinearProgressIndicator(
-                            progress = { rig.progressRatio() },
+                            progress = { progress },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(4.dp)
                                 .clip(RoundedCornerShape(2.dp)),
-                            color = EmeraldAccent,
+                            color = if (isExpired) CrimsonError else EmeraldAccent,
                             trackColor = DarkNavySurface
                         )
                         Spacer(modifier = Modifier.height(4.dp))
@@ -738,12 +777,30 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("${rig.daysRemaining()} Days Remaining", style = MaterialTheme.typography.labelSmall.copy(color = TextMuted, fontSize = 9.5.sp))
-                            Text("~15% Monthly Yield", style = MaterialTheme.typography.labelSmall.copy(color = TextGold, fontSize = 9.5.sp))
+                            Text(
+                                if (isExpired) "0 Days Remaining (Contract Complete)" else "$remainingDays Days Remaining (${rig.totalDays}d Contract)",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = if (isExpired) CrimsonError else TextMuted,
+                                    fontSize = 9.5.sp
+                                )
+                            )
+                            Text(
+                                if (isExpired) "Repurchase Node" else "~15% Monthly Yield",
+                                style = MaterialTheme.typography.labelSmall.copy(color = TextGold, fontSize = 9.5.sp)
+                            )
                         }
                     }
                 }
             }
+        }
+
+        // Transaction History View - Chronological Ledger of Node Deployments & Mining Rewards
+        item {
+            TransactionHistoryView(
+                accountState = accountState,
+                userState = userState,
+                onNavigateToStore = { onNavigateToTab(AppNavTab.RIGS_STORE) }
+            )
         }
     }
 }

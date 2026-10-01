@@ -34,15 +34,21 @@ data class UserRig(
     val expiryTimestamp: Long
         get() = purchaseTimestamp + (durationDays.toLong() * 24 * 60 * 60 * 1000)
 
+    val dailyYieldUsdt: Double
+        get() = (priceUsdt * 0.15) / 30.0
+
     fun daysRemaining(currentTimestamp: Long = System.currentTimeMillis()): Int {
-        val diff = expiryTimestamp - currentTimestamp
-        return if (diff > 0) (diff / (24 * 60 * 60 * 1000)).toInt() + 1 else 0
+        if (purchaseTimestamp <= 0L) return durationDays
+        val elapsedMillis = maxOf(0L, currentTimestamp - purchaseTimestamp)
+        val elapsedDays = (elapsedMillis / (1000L * 60 * 60 * 24)).toInt()
+        return maxOf(0, durationDays - elapsedDays)
     }
 
     fun progressRatio(currentTimestamp: Long = System.currentTimeMillis()): Float {
-        val totalMs = durationDays.toLong() * 24 * 60 * 60 * 1000
-        val elapsed = currentTimestamp - purchaseTimestamp
-        if (totalMs <= 0) return 1f
+        val totalMs = durationDays.toLong() * 24L * 60L * 60L * 1000L
+        if (totalMs <= 0L) return 1f
+        if (purchaseTimestamp <= 0L) return 0f
+        val elapsed = maxOf(0L, currentTimestamp - purchaseTimestamp)
         return (elapsed.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
     }
 }

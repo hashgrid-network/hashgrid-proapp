@@ -245,11 +245,13 @@ fun MainApp(
         }
     }
 
-    if (!userState.isAuthenticated || userState.secretKey.isBlank()) {
+    val accountState by viewModel.accountState.collectAsStateWithLifecycle()
+
+    if (accountState == null) {
         WelcomeAuthScreen(
-            isLoading = isRestoringAccount,
+            isLoading = false,
             onCreateAccount = { viewModel.createNewAccount() },
-            onRestoreAccount = { key -> viewModel.restoreAccountWithSecretKey(key) }
+            onRestoreAccount = { key -> viewModel.loginWithKey(key) }
         )
         return
     }
@@ -311,6 +313,7 @@ fun MainApp(
                     )
                     AppNavTab.RIGS_STORE -> RigsStoreScreen(
                         userState = userState,
+                        viewModel = viewModel,
                         onBuyRig = { rig -> viewModel.buyRig(rig) },
                         onPayWithNowPayments = { rig, payCurrency ->
                             viewModel.initiateNowPaymentsRigPurchase(rig, payCurrency)

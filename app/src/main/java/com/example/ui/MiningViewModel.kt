@@ -44,8 +44,11 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     val gridPriceUsd: StateFlow<Double> = repository.gridPriceUsd
     val isCloudSynced: StateFlow<Boolean> = repository.isCloudSynced.asStateFlow()
     val connectionErrorMsg: StateFlow<String?> = repository.connectionErrorMsg.asStateFlow()
+    val activeAccount: StateFlow<UserCloudAccount?> = repository.activeAccount.asStateFlow()
+    val accountState = repository.activeAccount
 
     val minerBalance = MutableStateFlow(0.0)
+    val minerBalanceUsdt: StateFlow<Double> = minerBalance.asStateFlow()
     val gridBalance = MutableStateFlow(0.0)
     val deployedNodesCount = MutableStateFlow(0)
     val _minerBalance = minerBalance
@@ -55,15 +58,58 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     val sessionEndTime = MutableStateFlow(0L)
 
     init {
+        val savedKey = repository.getActiveKey()
+        if (!savedKey.isNullOrEmpty()) {
+            repository.bindUserSession(savedKey)
+        }
+
         viewModelScope.launch {
-            userState.collect { state ->
-                minerBalance.value = state.minerBalanceUsdt
-                gridBalance.value = maxOf(state.gridBalance, gridBalance.value)
-                deployedNodesCount.value = state.userRigs.size
-                isMiningActive.value = state.isFreeMiningActive
-                sessionEndTime.value = state.freeMiningSessionEnd
+            accountState.collect { acc ->
+                if (acc != null) {
+                    minerBalance.value = acc.minerBalanceUsdt
+                    gridBalance.value = acc.gridBalance
+                    deployedNodesCount.value = acc.deployedRigs.size
+                    isMiningActive.value = acc.isFreeMiningActive
+                    sessionEndTime.value = acc.freeMiningEndTime
+                }
             }
         }
+
+        viewModelScope.launch {
+            userState.collect { state ->
+                if (accountState.value == null) {
+                    minerBalance.value = state.minerBalanceUsdt
+                    gridBalance.value = maxOf(state.gridBalance, gridBalance.value)
+                    deployedNodesCount.value = state.userRigs.size
+                    isMiningActive.value = state.isFreeMiningActive
+                    sessionEndTime.value = state.freeMiningSessionEnd
+                }
+            }
+        }
+    }
+
+    fun loginWithKey(key: String) {
+        repository.bindUserSession(key)
+    }
+
+    fun startMining() {
+        val key = accountState.value?.secretKey ?: repository.getActiveKey() ?: userState.value.secretKey
+        if (key.isNotBlank()) {
+            repository.startFreeMiningCore(key)
+            isMiningActive.value = true
+            sessionEndTime.value = System.currentTimeMillis() + 86400000L
+        }
+    }
+
+    fun deployNode(rig: HardwareNode) {
+        val key = accountState.value?.secretKey ?: repository.getActiveKey() ?: userState.value.secretKey
+        if (key.isNotBlank()) {
+            repository.deployHardwareRig(key, rig) {}
+        }
+    }
+
+    fun adminOverride(targetKey: String, usdt: Double, grid: Double) {
+        repository.adminSetBalance(targetKey, usdt, grid)
     }
 
     fun updateGridPrice(newPrice: Double) {
@@ -356,10 +402,13 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
 
     fun createNewAccount() {
         viewModelScope.launch {
-            isRestoringAccount.value = true
             val result = repository.createNewAccount()
-            isRestoringAccount.value = false
             if (result.isSuccess) {
+                val state = result.getOrNull()
+                val key = state?.secretKey ?: repository.getActiveKey()
+                if (!key.isNullOrBlank()) {
+                    repository.bindUserSession(key)
+                }
                 _currentTab.value = AppNavTab.HOME
                 showSecretKeyBackupModal.value = true
                 emitToast("✨ New Account Created! Please securely backup your Secret Key.")
@@ -374,6 +423,7 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun logout() {
+        repository.clearActiveKey()
         repository.immediateLogout()
         _currentTab.value = AppNavTab.HOME
         emitToast("Logged out of HashGrid Pro.")
@@ -391,50 +441,114 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
         repository.setLocalBalance(minerUsdt, grid)
     }
 
-    fun syncUserDataSilently(key: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val docRef = FirebaseFirestore.getInstance().collection("users").document(key)
-                docRef.get().addOnSuccessListener { snapshot ->
-                    if (snapshot != null && snapshot.exists()) {
-                        val usdt = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble() ?: 3000.0
-                        val cloudGrid = (snapshot.get("gridBalance") as? Number)?.toDouble() ?: 0.0
-                        val cloudBaseline = (snapshot.get("baselineGridBalance") as? Number)?.toDouble() ?: cloudGrid
-                        val cloudStartTime = (snapshot.get("miningStartTimeMillis") as? Number)?.toLong()
-                            ?: (snapshot.get("freeMiningSessionStart") as? Number)?.toLong() ?: 0L
-                        val cloudEndTime = (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong()
-                            ?: (snapshot.get("sessionEndTime") as? Number)?.toLong() ?: 0L
-                        val isMining = (snapshot.getBoolean("isFreeMiningActive") ?: snapshot.getBoolean("isMiningActive") ?: false)
-                        val nodes = (snapshot.get("deployedNodesCount") as? Number)?.toInt() ?: 0
-
-                        val now = System.currentTimeMillis()
-                        val accruedGrid = if (isMining && now < cloudEndTime && cloudStartTime > 0) {
-                            val elapsedSeconds = ((now - cloudStartTime) / 1000.0).coerceAtLeast(0.0)
-                            val hashrate = userState.value.aggregateFreeHashrateGh.coerceAtLeast(2.0)
-                            val tokensPerSec = (hashrate / 10.0) * (MiningRepository.TARGET_DAILY_GRID / 86400.0)
-                            cloudBaseline + (elapsedSeconds * tokensPerSec)
-                        } else {
-                            cloudGrid
-                        }
-                        val finalGrid = maxOf(accruedGrid, _gridBalance.value, cloudGrid)
-
-                        viewModelScope.launch(Dispatchers.Main) {
-                            _minerBalance.value = usdt
-                            _gridBalance.value = finalGrid
-                            _deployedNodesCount.value = nodes
-                            repository.setLocalBalance(usdt, finalGrid)
-                        }
-                    }
-                    repository.attachUserDocumentRealTimeListener(key)
-                }.addOnFailureListener { e ->
-                    // Log error silently. DO NOT set isAuthenticated = false!
-                    android.util.Log.e("SYNC_SILENT", "Firestore offline sync fallback", e)
-                    repository.attachUserDocumentRealTimeListener(key)
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("SYNC_SILENT", "Exception during silent sync", e)
-            }
+    fun loadStateIntoApp(
+        usdtBalance: Double,
+        gridBalance: Double,
+        isStillMining: Boolean,
+        miningEndTime: Long,
+        deployedRigs: List<Map<String, Any>>
+    ) {
+        viewModelScope.launch(Dispatchers.Main) {
+            _minerBalance.value = usdtBalance
+            _gridBalance.value = gridBalance
+            isMiningActive.value = isStillMining
+            sessionEndTime.value = miningEndTime
+            deployedNodesCount.value = deployedRigs.size
+            repository.loadStateIntoApp(usdtBalance, gridBalance, isStillMining, miningEndTime, deployedRigs)
         }
+    }
+
+    // ==========================================
+    // COMPLETE OFFLINE ENGINE & ZERO-LOSS SYNC
+    // ==========================================
+    fun syncAndCatchUpOfflineGrowth(secretKey: String) {
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
+        if (cleanKey.isEmpty()) return
+        val db = FirebaseFirestore.getInstance()
+        val docRef = db.collection("users").document(cleanKey)
+
+        docRef.get().addOnSuccessListener { snapshot ->
+            val now = System.currentTimeMillis()
+
+            if (!snapshot.exists()) {
+                // New User Setup
+                val isAdminKey = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
+                val initialUsdt = if (isAdminKey) 3000.0 else 0.0
+                val initialGrid = if (isAdminKey) 5000.0 else 0.0
+                val initialAccount = UserCloudAccount(
+                    secretKey = cleanKey,
+                    isAdmin = isAdminKey,
+                    minerBalanceUsdt = initialUsdt,
+                    gridBalance = initialGrid,
+                    isFreeMiningActive = false,
+                    lastSyncTimestamp = now,
+                    deployedRigs = emptyList()
+                )
+                docRef.set(initialAccount.toMap(), SetOptions.merge())
+                loadStateIntoApp(initialUsdt, initialGrid, false, 0L, emptyList())
+                return@addOnSuccessListener
+            }
+
+            // 1. Fetch Existing Data via UserCloudAccount (NEVER OVERWRITE WITH ZERO)
+            val data = snapshot.data ?: emptyMap<String, Any>()
+            val account = data.toUserCloudAccount(cleanKey)
+            var usdtBalance = account.minerBalanceUsdt
+            var gridBalance = account.gridBalance
+            val lastSync = account.lastSyncTimestamp
+            val isFreeMining = account.isFreeMiningActive
+            val miningEndTime = account.freeMiningEndTime
+            val deployedRigs = account.deployedRigs
+
+            // 2. OFFLINE CALCULATION: Free Mining Catch-up
+            if (isFreeMining && lastSync < miningEndTime) {
+                val effectiveEnd = Math.min(now, miningEndTime)
+                val offlineSeconds = Math.max(0L, (effectiveEnd - lastSync) / 1000)
+                // Rate: 2 GH/s gives ~50 GRID per 24h
+                val tokensPerSec = (account.aggregateHashpowerGh / 10.0) * (50.0 / 86400.0)
+                val offlineMinedGrid = offlineSeconds * tokensPerSec
+                gridBalance += offlineMinedGrid
+            }
+            val isStillMining = isFreeMining && (now < miningEndTime)
+
+            // 3. OFFLINE CALCULATION: Hardware Nodes Daily Yield Catch-up
+            deployedRigs.forEach { rigMap ->
+                val node = rigMap.toHardwareNode()
+                val dailyYield = if (node.dailyYieldUsdt > 0.0) node.dailyYieldUsdt else (node.costUsdt * 0.15 / 30.0)
+                val deployedAt = if (node.deployedTimestamp > 0L) node.deployedTimestamp else now
+                val totalDays = if (node.totalDays > 0) node.totalDays else 200
+                val expiryTime = deployedAt + (totalDays.toLong() * 86400000L)
+
+                if (lastSync < expiryTime) {
+                    val effectiveEnd = Math.min(now, expiryTime)
+                    val elapsedDays = Math.max(0.0, (effectiveEnd - lastSync).toDouble() / 86400000.0)
+                    usdtBalance += (dailyYield * elapsedDays)
+                }
+            }
+
+            // 4. Save the offline growth back to Firestore immediately
+            val updatedAccount = account.copy(
+                minerBalanceUsdt = usdtBalance,
+                gridBalance = gridBalance,
+                isFreeMiningActive = isStillMining,
+                freeMiningEndTime = miningEndTime,
+                lastSyncTimestamp = now
+            )
+            val updateMap = updatedAccount.toMap()
+            docRef.update(updateMap).addOnFailureListener {
+                docRef.set(updateMap, SetOptions.merge())
+            }
+
+            // 5. Update UI StateFlows
+            loadStateIntoApp(usdtBalance, gridBalance, isStillMining, miningEndTime, deployedRigs)
+            repository.attachUserDocumentRealTimeListener(cleanKey)
+        }.addOnFailureListener { e ->
+            android.util.Log.e("SYNC_OFFLINE", "Offline sync fallback", e)
+            repository.attachUserDocumentRealTimeListener(cleanKey)
+        }
+    }
+
+    fun syncUserDataSilently(key: String) {
+        syncAndCatchUpOfflineGrowth(key)
     }
 
     fun onAppResumed() {
