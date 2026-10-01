@@ -329,7 +329,8 @@ fun MainApp(
                         onLockAppNow = { viewModel.lockApp() },
                         onOpenAdminControlHub = { viewModel.showAdminControlHubDialog.value = true },
                         onLogout = { viewModel.logout() },
-                        onGridBalanceClick = { viewModel.showGridLockedDialog.value = true }
+                        onGridBalanceClick = { viewModel.showGridLockedDialog.value = true },
+                        viewModel = viewModel
                     )
                 }
             }

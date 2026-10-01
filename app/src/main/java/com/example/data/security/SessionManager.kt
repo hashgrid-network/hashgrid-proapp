@@ -13,6 +13,10 @@ class SessionManager(private val context: Context) {
         securityPreferences.setActiveUserKey(key)
     }
 
+    fun clearActiveKey() {
+        securityPreferences.clearSession()
+    }
+
     companion object {
         @Volatile
         private var INSTANCE: SessionManager? = null

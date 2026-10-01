@@ -81,6 +81,10 @@ class SecurityPreferences(context: Context) {
         }
     }
 
+    fun saveActiveKey(key: String) {
+        setActiveUserKey(key)
+    }
+
     fun isSecretKeyBackedUp(): Boolean {
         return try {
             prefs.getBoolean(KEY_IS_BACKED_UP, false)

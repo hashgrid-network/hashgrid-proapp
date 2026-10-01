@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import com.example.data.security.SecretKeyUtils
 
 enum class AppNavTab {
     HOME,
@@ -45,6 +46,10 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
 
     val minerBalance = MutableStateFlow(0.0)
     val gridBalance = MutableStateFlow(0.0)
+    val deployedNodesCount = MutableStateFlow(0)
+    val _minerBalance = minerBalance
+    val _gridBalance = gridBalance
+    val _deployedNodesCount = deployedNodesCount
     val isMiningActive = MutableStateFlow(false)
     val sessionEndTime = MutableStateFlow(0L)
 
@@ -53,6 +58,7 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
             userState.collect { state ->
                 minerBalance.value = state.minerBalanceUsdt
                 gridBalance.value = state.gridBalance
+                deployedNodesCount.value = state.userRigs.size
                 isMiningActive.value = state.isFreeMiningActive
                 sessionEndTime.value = state.freeMiningSessionEnd
             }
@@ -367,11 +373,9 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun logout() {
-        viewModelScope.launch {
-            repository.logout()
-            _currentTab.value = AppNavTab.HOME
-            emitToast("Logged out of HashGrid Pro.")
-        }
+        repository.immediateLogout()
+        _currentTab.value = AppNavTab.HOME
+        emitToast("Logged out of HashGrid Pro.")
     }
 
     fun syncMinedTokens() {
@@ -380,21 +384,52 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun restoreAccount(key: String, onComplete: (Boolean) -> Unit = {}) {
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(key)
+        val docRef = FirebaseFirestore.getInstance().collection("users").document(cleanKey)
+        docRef.get().addOnSuccessListener { snapshot ->
+            if (snapshot.exists()) {
+                val savedUsdt = (snapshot.get("minerBalanceUsdt") as? Number)?.toDouble()
+                    ?: (snapshot.get("usdtBalance") as? Number)?.toDouble()
+                    ?: 0.0
+                val savedGrid = (snapshot.get("gridBalance") as? Number)?.toDouble() ?: 0.0
+                val savedNodesCount = (snapshot.get("deployedNodesCount") as? Number)?.toInt()
+                    ?: (snapshot.get("hardwareNodes") as? List<*>)?.size
+                    ?: 0
+
+                // Load restored cloud data directly into state
+                _minerBalance.value = savedUsdt
+                _gridBalance.value = savedGrid
+                _deployedNodesCount.value = savedNodesCount
+            }
+            repository.securityPreferences.saveActiveKey(cleanKey)
+
+            // Synchronize through repository to attach real-time listener and update userState
+            repository.restoreAccount(cleanKey) { success ->
+                if (success) {
+                    _currentTab.value = AppNavTab.HOME
+                    showSecretKeyRestoreModal.value = false
+                    repository.setAppLocked(false)
+                    emitToast("Restored from Firestore: $${_minerBalance.value} USDT / ${_gridBalance.value} GRID")
+                    if (!repository.isPinSet()) {
+                        showPinSetupModal.value = true
+                    }
+                } else {
+                    emitToast("Failed to restore account. Please check your Secret Key.")
+                }
+                onComplete(success)
+            }
+        }.addOnFailureListener { e ->
+            emitToast("Firestore fetch failed: ${e.localizedMessage}")
+            onComplete(false)
+        }
+    }
+
     fun restoreAccountWithSecretKey(secretKey: String) {
         viewModelScope.launch {
             isRestoringAccount.value = true
-            val result = repository.restoreAccountWithSecretKey(secretKey)
-            isRestoringAccount.value = false
-            if (result.isSuccess) {
-                showSecretKeyRestoreModal.value = false
-                _currentTab.value = AppNavTab.HOME
-                repository.setAppLocked(false)
-                emitToast("Account Restored Successfully! All balances and active rigs synced from Firestore.")
-                if (!repository.isPinSet()) {
-                    showPinSetupModal.value = true
-                }
-            } else {
-                emitToast(result.exceptionOrNull()?.message ?: "Account restoration failed.")
+            restoreAccount(secretKey) { success ->
+                isRestoringAccount.value = false
             }
         }
     }

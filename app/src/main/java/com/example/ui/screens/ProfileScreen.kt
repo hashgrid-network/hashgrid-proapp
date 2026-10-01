@@ -54,6 +54,7 @@ fun ProfileScreen(
     onOpenAdminControlHub: () -> Unit = {},
     onLogout: () -> Unit = {},
     onGridBalanceClick: () -> Unit = {},
+    viewModel: com.example.ui.MiningViewModel? = null,
     modifier: Modifier = Modifier
 ) {
     var customPriceInput by remember(currentGridPrice) { mutableStateOf(String.format("%.2f", currentGridPrice)) }
@@ -1034,16 +1035,19 @@ fun ProfileScreen(
                 )
             },
             confirmButton = {
-                Button(
+                TextButton(
                     onClick = {
                         showLogoutConfirmDialog = false
+                        viewModel?.logout()
                         onLogout()
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = CrimsonError),
-                    shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.testTag("confirm_logout_btn")
                 ) {
-                    Text("Log Out", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = Color.White))
+                    Text(
+                        text = "Log Out",
+                        color = Color(0xFFFF5252),
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                    )
                 }
             },
             dismissButton = {
