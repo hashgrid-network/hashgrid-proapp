@@ -57,6 +57,9 @@ data class UserMiningState(
     val role: String = "user",
     val isAuthenticated: Boolean = true
 ) {
+    val activeKey: String
+        get() = secretKey
+
     // Referral boost calculation: +0.25 per registration, +0.50 per active miner
     val referralBoostHashrateGh: Double
         get() = if (totalHashrateBoostGh > 0.0) totalHashrateBoostGh else ((referralCount * 0.25) + (activeReferredMiners * 0.50))

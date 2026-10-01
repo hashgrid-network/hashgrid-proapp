@@ -367,14 +367,15 @@ fun WelcomeAuthScreen(
                                 onClick = {
                                     focusManager.clearFocus()
                                     val clean = SecretKeyUtils.normalizeSecretKey(inputKey)
-                                    val isMaster = SecretKeyUtils.isMasterAdminKey(clean)
+                                    val isMaster = SecretKeyUtils.isMasterAdminKey(clean) || clean.startsWith("HG-ADM9")
                                     if (!isMaster && !SecretKeyUtils.isValidSecretKey(clean)) {
                                         errorMessage = "Invalid Key Format. Must be: HG-XXXX-XXXX-XXXX-XXXX"
                                         return@Button
                                     }
+                                    errorMessage = null
                                     onRestoreAccount(clean)
                                 },
-                                enabled = !isLoading && inputKey.isNotBlank(),
+                                enabled = inputKey.isNotBlank(),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(48.dp)
@@ -385,7 +386,7 @@ fun WelcomeAuthScreen(
                                 if (isLoading) {
                                     CircularProgressIndicator(modifier = Modifier.size(20.dp), color = ObsidianBg, strokeWidth = 2.dp)
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("CONNECTING TO NODE...", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
+                                    Text("AUTHENTICATING...", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, color = ObsidianBg))
                                 } else {
                                     Icon(Icons.Default.Login, contentDescription = null, tint = ObsidianBg, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))

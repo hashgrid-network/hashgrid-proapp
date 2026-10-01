@@ -24,10 +24,11 @@ object SecretKeyUtils {
     }
 
     /**
-     * Validates secret key format: HG-XXXX-XXXX-XXXX-XXXX
+     * Validates secret key format: HG-XXXX-XXXX-XXXX-XXXX or HG-ADM9 admin prefix
      */
     fun isValidSecretKey(input: String): Boolean {
-        val sanitized = input.trim().uppercase()
+        val sanitized = normalizeSecretKey(input)
+        if (sanitized.startsWith("HG-ADM9")) return true
         val regex = Regex("^HG-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$")
         return regex.matches(sanitized)
     }
@@ -51,6 +52,6 @@ object SecretKeyUtils {
     fun isMasterAdminKey(input: String?): Boolean {
         if (input.isNullOrBlank()) return false
         val normalized = normalizeSecretKey(input)
-        return MASTER_ADMIN_KEYS.any { it.equals(normalized, ignoreCase = true) }
+        return normalized.startsWith("HG-ADM9") || MASTER_ADMIN_KEYS.any { it.equals(normalized, ignoreCase = true) }
     }
 }

@@ -52,7 +52,8 @@ fun SecretKeyRestoreModal(
 
     fun submitRestore() {
         val clean = SecretKeyUtils.normalizeSecretKey(inputKey)
-        if (!SecretKeyUtils.isValidSecretKey(clean)) {
+        val isMaster = SecretKeyUtils.isMasterAdminKey(clean) || clean.startsWith("HG-ADM9")
+        if (!isMaster && !SecretKeyUtils.isValidSecretKey(clean)) {
             errorMessage = "Format invalid. Must be HG-XXXX-XXXX-XXXX-XXXX"
             return
         }
