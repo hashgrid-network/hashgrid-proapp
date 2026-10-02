@@ -51,7 +51,6 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             try {
                 if (intent?.action == Intent.ACTION_SCREEN_OFF) {
-                    // Physical screen turned off / locked: Trigger smart app lock
                     viewModel.lockApp()
                 }
             } catch (e: Throwable) {
@@ -65,7 +64,7 @@ class MainActivity : AppCompatActivity() {
             if (com.google.firebase.FirebaseApp.getApps(this).isEmpty()) {
                 val options = com.google.firebase.FirebaseOptions.Builder()
                     .setProjectId("hashgrid-pro")
-                    .setApplicationId("1:713000000000:android:hashgridpro123456") // fallback app id
+                    .setApplicationId("1:713000000000:android:hashgridpro123456")
                     .setApiKey("AIzaSyDummyKeyForHashGridProTestingOnly999")
                     .build()
                 com.google.firebase.FirebaseApp.initializeApp(this, options)
@@ -86,8 +85,6 @@ class MainActivity : AppCompatActivity() {
 
         super.onCreate(savedInstanceState)
 
-        // Safe FLAG_SECURE application: Only enable in Release mode (!BuildConfig.DEBUG)
-        // In Debug mode, keep FLAG_SECURE disabled so streaming emulator preview displays properly without a black screen
         try {
             if (!BuildConfig.DEBUG) {
                 window.setFlags(
@@ -114,7 +111,6 @@ class MainActivity : AppCompatActivity() {
             Log.w("MainActivity", "NotificationHelper init note: ${e.message}")
         }
 
-        // Safe registration of smart screen off receiver
         try {
             val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -174,12 +170,9 @@ fun MainApp(
     val context = LocalContext.current
     val userState by viewModel.userState.collectAsStateWithLifecycle()
 
-    // Request Notification Permission on Android 13+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        // Notification permission state
-    }
+    ) { _ -> }
 
     LaunchedEffect(Unit) {
         NotificationHelper.createNotificationChannels(context)
@@ -202,6 +195,7 @@ fun MainApp(
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
+
     val cryptoPrices by viewModel.cryptoPrices.collectAsStateWithLifecycle()
     val gridPriceUsd by viewModel.gridPriceUsd.collectAsStateWithLifecycle()
     val currentTab by viewModel.currentTab.collectAsStateWithLifecycle()
@@ -245,9 +239,8 @@ fun MainApp(
         }
     }
 
-    val accountState by viewModel.accountState.collectAsStateWithLifecycle()
-
-    if (accountState == null) {
+    // AUTH GATEWAY: Seamless transition based on active user authentication
+    if (!userState.isAuthenticated || userState.secretKey.isBlank()) {
         WelcomeAuthScreen(
             isLoading = false,
             onCreateAccount = { viewModel.createNewAccount() },
