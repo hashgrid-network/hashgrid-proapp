@@ -70,7 +70,7 @@ class MiningRepository(context: Context) {
     val _gridBalance = gridBalance
     val minerBalance = MutableStateFlow(0.0)
     val _minerBalance = minerBalance
-    
+
     val isCloudSynced = MutableStateFlow(false)
     val connectionErrorMsg = MutableStateFlow<String?>(null)
     private var snapshotRegistration: ListenerRegistration? = null
@@ -94,7 +94,7 @@ class MiningRepository(context: Context) {
     }
 
     // ========================================================
-    // UNIFIED FIRESTORE REAL-TIME SYNC & ZERO-OVERWRITE BIND
+    // UNIFIED FIRESTORE REAL-TIME SYNC & ZERO-LOSS RESTORE
     // ========================================================
     fun bindUserSession(secretKey: String) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
@@ -114,7 +114,6 @@ class MiningRepository(context: Context) {
             val now = System.currentTimeMillis()
 
             if (snapshot == null || !snapshot.exists()) {
-                // Only create default if completely new user. SUPERADMIN gets $3000 fallback
                 val isMaster = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
                 val defaultUsdt = if (isMaster) 3000.0 else 0.0
                 val defaultRigs = if (isMaster) listOf(
@@ -131,6 +130,11 @@ class MiningRepository(context: Context) {
                     "isFreeMiningActive" to false,
                     "freeMiningEndTime" to 0L,
                     "hardwareNodes" to defaultRigs,
+                    "transactions" to emptyList<Map<String, Any>>(),
+                    "securityPin" to "",
+                    "lastDailySpinTimestamp" to 0L,
+                    "dailySpentUsdt" to 0.0,
+                    "dailySpentResetDate" to now,
                     "lastSyncTimestamp" to now
                 )
                 docRef.set(initialMap)
@@ -139,7 +143,7 @@ class MiningRepository(context: Context) {
                 return@addSnapshotListener
             }
 
-            // DOCUMENT EXISTS: READ REAL CLOUD DATA (NEVER OVERWRITE WITH ZERO)
+            // Document Exists: Hydrate All Cloud States (Never Wipe)
             isCloudSynced.value = true
             isCloudHydrated = true
 
@@ -155,7 +159,7 @@ class MiningRepository(context: Context) {
                 ?: (snapshot.get("deployedRigs") as? List<Map<String, Any>>)
                 ?: emptyList()
 
-            // Calculate Offline Catch-Up for Free Mining
+            // 1. Calculate Offline Free Mining Accrual
             val isMiningRunning = isFreeMining && (now < sessionEnd)
             if (isFreeMining && lastSync < sessionEnd) {
                 val effectiveEnd = Math.min(now, sessionEnd)
@@ -164,7 +168,7 @@ class MiningRepository(context: Context) {
                 grid += minedDelta
             }
 
-            // Calculate Offline Yield for Hardware Rigs
+            // 2. Calculate Offline Hardware Nodes Yield
             rawNodes.forEach { rig ->
                 val dailyYield = (rig["dailyYieldUsdt"] as? Number)?.toDouble() ?: 0.0
                 val deployedAt = (rig["deployedTimestamp"] as? Number)?.toLong() ?: now
@@ -177,7 +181,33 @@ class MiningRepository(context: Context) {
                 }
             }
 
-            // Sync States
+            // 3. Restore All 6 Cloud-Attached Features
+            val rawTxs = snapshot.get("transactions") as? List<Map<String, Any>> ?: emptyList()
+            val restoredTransactions = rawTxs.mapNotNull { map ->
+                try {
+                    TransactionItem(
+                        id = map["id"] as? String ?: UUID.randomUUID().toString(),
+                        type = TransactionType.valueOf((map["type"] as? String) ?: "DEPOSIT"),
+                        amount = (map["amount"] as? Number)?.toDouble() ?: 0.0,
+                        currency = (map["currency"] as? String) ?: "USDT",
+                        timestamp = (map["timestamp"] as? Number)?.toLong() ?: now,
+                        status = TransactionStatus.valueOf((map["status"] as? String) ?: "COMPLETED"),
+                        description = (map["description"] as? String) ?: "",
+                        network = (map["network"] as? String) ?: "BEP20 (BSC)"
+                    )
+                } catch (e: Exception) { null }
+            }
+
+            val cloudPin = snapshot.getString("securityPin") ?: ""
+            val lastSpinTime = (snapshot.get("lastDailySpinTimestamp") as? Number)?.toLong() ?: 0L
+            val spentUsdt = (snapshot.get("dailySpentUsdt") as? Number)?.toDouble() ?: 0.0
+            val spentReset = (snapshot.get("dailySpentResetDate") as? Number)?.toLong() ?: now
+
+            if (cloudPin.isNotBlank()) {
+                securityPreferences.setPin(cloudPin)
+            }
+
+            // 4. Update UI StateFlows
             _minerBalance.value = usdt
             _gridBalance.value = grid
             _isMiningActive.value = isMiningRunning
@@ -219,12 +249,17 @@ class MiningRepository(context: Context) {
                 freeMiningSessionStart = sessionStart,
                 freeMiningSessionEnd = sessionEnd,
                 userRigs = userRigsList,
+                transactions = restoredTransactions,
+                isPinConfigured = cloudPin.isNotBlank(),
+                lastDailySpinTimestamp = lastSpinTime,
+                dailySpentUsdt = spentUsdt,
+                dailySpentResetDate = spentReset,
                 isAdmin = isAdmin,
                 role = if (isAdmin) "superadmin" else "user",
                 isAuthenticated = true
             )
 
-            // Cache locally
+            // Cache to local SharedPreferences
             prefs.edit()
                 .putFloat("miner_balance", usdt.toFloat())
                 .putFloat("grid_balance", grid.toFloat())
@@ -236,15 +271,281 @@ class MiningRepository(context: Context) {
         }
     }
 
+    // ========================================================
+    // CLOUD ATTACHMENT FOR ALL 6 PENDING FEATURES
+    // ========================================================
+
+    // 1. Transaction History (Cloud Synced)
+    fun recordCloudTransaction(secretKey: String, tx: TransactionItem) {
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
+        if (cleanKey.isBlank()) return
+        val now = System.currentTimeMillis()
+
+        val txMap = mapOf(
+            "id" to tx.id,
+            "type" to tx.type.name,
+            "amount" to tx.amount,
+            "currency" to tx.currency,
+            "timestamp" to tx.timestamp,
+            "status" to tx.status.name,
+            "description" to tx.description,
+            "network" to tx.network,
+            "txHash" to (tx.txHash ?: "")
+        )
+
+        firestore.collection("users").document(cleanKey).update(
+            "transactions", FieldValue.arrayUnion(txMap),
+            "lastSyncTimestamp", now
+        ).addOnFailureListener {
+            firestore.collection("users").document(cleanKey).set(
+                mapOf("transactions" to listOf(txMap), "lastSyncTimestamp" to now),
+                SetOptions.merge()
+            )
+        }
+    }
+
+    // 2. 4-Digit PIN Security (Cloud Persistent)
+    fun savePinToCloud(secretKey: String, pin: String, onSuccess: () -> Unit = {}) {
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
+        if (cleanKey.isBlank()) return
+
+        securityPreferences.setPin(pin)
+        _userState.value = _userState.value.copy(isPinConfigured = true, isAppLocked = false)
+
+        firestore.collection("users").document(cleanKey).update(
+            mapOf(
+                "securityPin" to pin,
+                "isPinConfigured" to true,
+                "lastSyncTimestamp" to System.currentTimeMillis()
+            )
+        ).addOnSuccessListener { onSuccess() }
+    }
+
+    // 3. Daily Lucky Wheel (24H Cloud Lock)
+    fun isLuckySpinAvailable(): Boolean {
+        val lastSpin = _userState.value.lastDailySpinTimestamp
+        return (System.currentTimeMillis() - lastSpin) >= 86400000L
+    }
+
+    fun executeLuckySpin(sector: SpinSector): SpinHistoryRecord {
+        val current = _userState.value
+        val now = System.currentTimeMillis()
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(current.secretKey.ifBlank { getActiveKey() ?: "" })
+
+        var newMinerBal = current.minerBalanceUsdt
+        var newGridBal = current.gridBalance
+
+        when (sector.type) {
+            SpinRewardType.GRID_TOKENS -> {
+                newGridBal += sector.value
+                claimWheelReward(cleanKey, sector.value)
+            }
+            SpinRewardType.USDT -> {
+                newMinerBal += sector.value
+                firestore.collection("users").document(cleanKey).update(
+                    "minerBalanceUsdt", FieldValue.increment(sector.value),
+                    "lastDailySpinTimestamp", now,
+                    "lastSyncTimestamp", now
+                )
+            }
+            else -> {}
+        }
+
+        val record = SpinHistoryRecord(
+            id = "spin-${UUID.randomUUID().toString().take(6)}",
+            rewardTitle = sector.title,
+            rewardSubtitle = sector.subtitle,
+            timestamp = now,
+            rewardType = sector.type,
+            value = sector.value
+        )
+
+        val tx = TransactionItem(
+            id = "tx-spin-${UUID.randomUUID().toString().take(6)}",
+            type = TransactionType.LUCKY_SPIN_REWARD,
+            amount = sector.value,
+            currency = if (sector.type == SpinRewardType.USDT) "USDT" else if (sector.type == SpinRewardType.GRID_TOKENS) "GRID" else "GH/s",
+            timestamp = now,
+            status = TransactionStatus.COMPLETED,
+            description = "Daily Lucky Wheel Prize: ${sector.title}"
+        )
+
+        _userState.value = current.copy(
+            minerBalanceUsdt = newMinerBal,
+            gridBalance = newGridBal,
+            lastDailySpinTimestamp = now,
+            spinHistory = listOf(record) + current.spinHistory,
+            transactions = listOf(tx) + current.transactions
+        )
+
+        recordCloudTransaction(cleanKey, tx)
+        return record
+    }
+
+    // 4. Promotional Bounties & Tasks (Cloud Submissions)
+    fun submitMicroTask(platform: TaskPlatform, initialViews: Int, finalViews: Int, notes: String) {
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(getActiveKey() ?: _userState.value.secretKey)
+        val now = System.currentTimeMillis()
+        val rewardEst = 2.50 + Random.nextDouble(1.0, 15.0)
+
+        val sub = MicroTaskSubmission(
+            id = "task-${UUID.randomUUID().toString().take(6)}",
+            platform = platform,
+            submittedAt = now,
+            initialViewCount = initialViews,
+            finalViewCount = finalViews,
+            status = PromoStatus.PENDING_REVIEW,
+            rewardUsdt = rewardEst,
+            notes = notes
+        )
+
+        _userState.value = _userState.value.copy(
+            microTasks = listOf(sub) + _userState.value.microTasks
+        )
+
+        val subMap = mapOf(
+            "id" to sub.id,
+            "platform" to platform.name,
+            "submittedAt" to now,
+            "initialViewCount" to initialViews,
+            "finalViewCount" to finalViews,
+            "status" to "PENDING_REVIEW",
+            "rewardUsdt" to rewardEst,
+            "notes" to notes
+        )
+
+        firestore.collection("users").document(cleanKey).update(
+            "microTasks", FieldValue.arrayUnion(subMap),
+            "lastSyncTimestamp", now
+        )
+    }
+
+    fun submitVideoPromo(platform: TaskPlatform, url: String, channel: String) {
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(getActiveKey() ?: _userState.value.secretKey)
+        val now = System.currentTimeMillis()
+
+        val sub = VideoPromotionSubmission(
+            id = "vid-${UUID.randomUUID().toString().take(6)}",
+            platform = platform,
+            videoUrl = url,
+            channelOrHandle = channel,
+            submittedAt = now,
+            status = PromoStatus.PENDING_REVIEW,
+            rewardUsdt = 0.0
+        )
+
+        _userState.value = _userState.value.copy(
+            videoPromotions = listOf(sub) + _userState.value.videoPromotions
+        )
+
+        val videoMap = mapOf(
+            "id" to sub.id,
+            "platform" to platform.name,
+            "videoUrl" to url,
+            "channelOrHandle" to channel,
+            "submittedAt" to now,
+            "status" to "PENDING_REVIEW",
+            "rewardUsdt" to 0.0
+        )
+
+        firestore.collection("users").document(cleanKey).update(
+            "videoPromotions", FieldValue.arrayUnion(videoMap),
+            "lastSyncTimestamp", now
+        )
+    }
+
+    // 5. Withdrawal Pipeline (Root Withdrawals + User Document)
+    fun requestWithdrawal(amountUsdt: Double, address: String, network: String): Result<TransactionItem> {
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(getActiveKey() ?: _userState.value.secretKey)
+        val current = _userState.value
+        if (amountUsdt < 10.0 || current.minerBalanceUsdt < amountUsdt) {
+            return Result.failure(Exception("Insufficient withdrawable USDT balance."))
+        }
+
+        val now = System.currentTimeMillis()
+        val txId = "tx-wd-${UUID.randomUUID().toString().take(8)}"
+        val tx = TransactionItem(
+            id = txId,
+            type = TransactionType.WITHDRAWAL,
+            amount = amountUsdt,
+            currency = "USDT",
+            timestamp = now,
+            status = TransactionStatus.PENDING_REVIEW,
+            description = "Withdrawal to ${address.take(6)}...${address.takeLast(4)} (24H Security Audit)",
+            address = address,
+            network = network
+        )
+
+        _minerBalance.value = current.minerBalanceUsdt - amountUsdt
+        _userState.value = current.copy(
+            minerBalanceUsdt = current.minerBalanceUsdt - amountUsdt,
+            transactions = listOf(tx) + current.transactions
+        )
+
+        firestore.collection("users").document(cleanKey).update(
+            "minerBalanceUsdt", FieldValue.increment(-amountUsdt),
+            "lastSyncTimestamp", now
+        )
+        recordCloudTransaction(cleanKey, tx)
+
+        // Add to Root Firestore withdrawals Collection for Admin Hub
+        val adminWithdrawalRecord = mapOf(
+            "txId" to txId,
+            "secretKey" to cleanKey,
+            "amountUsdt" to amountUsdt,
+            "address" to address,
+            "network" to network,
+            "requestedAt" to now,
+            "status" to "PENDING_REVIEW"
+        )
+        firestore.collection("withdrawals").document(txId).set(adminWithdrawalRecord)
+
+        return Result.success(tx)
+    }
+
+    // 6. Daily Purchase Limit Tracker ($5,000 USDT)
+    fun checkAndUpdatePurchaseLimit(secretKey: String, purchaseAmount: Double): Boolean {
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
+        val current = _userState.value
+        val now = System.currentTimeMillis()
+
+        var currentSpent = current.dailySpentUsdt
+        var resetDate = current.dailySpentResetDate
+
+        if (now - resetDate >= 86400000L) {
+            currentSpent = 0.0
+            resetDate = now
+        }
+
+        if (currentSpent + purchaseAmount > 5000.0) {
+            return false
+        }
+
+        val updatedSpent = currentSpent + purchaseAmount
+        _userState.value = current.copy(
+            dailySpentUsdt = updatedSpent,
+            dailySpentResetDate = resetDate
+        )
+
+        firestore.collection("users").document(cleanKey).update(
+            mapOf(
+                "dailySpentUsdt" to updatedSpent,
+                "dailySpentResetDate" to resetDate,
+                "lastSyncTimestamp" to now
+            )
+        )
+        return true
+    }
+
     // ==========================================
-    // MINING START (24H ATOMIC EXTENSION)
+    // MINING START & HARDWARE DEPLOYMENT
     // ==========================================
     fun startFreeMiningSession() {
         val current = _userState.value
         val activeKey = current.secretKey.ifBlank { getActiveKey() ?: "HG-ADM9-7788-5544-0001" }
         val cleanKey = SecretKeyUtils.normalizeSecretKey(activeKey)
         val now = System.currentTimeMillis()
-        val end = now + 86400000L // 24 Hours
+        val end = now + 86400000L
 
         _isMiningActive.value = true
         _freeMiningEndTime.value = end
@@ -286,9 +587,6 @@ class MiningRepository(context: Context) {
         startFreeMiningSession()
     }
 
-    // ==========================================
-    // HARDWARE RIG ATOMIC DEPLOYMENT
-    // ==========================================
     fun deployHardwareRig(secretKey: String, rig: HardwareNode, onSuccess: () -> Unit = {}) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
         val docRef = firestore.collection("users").document(cleanKey)
@@ -315,6 +613,11 @@ class MiningRepository(context: Context) {
     fun buyRig(catalogItem: RigCatalogItem, useWalletBalance: Boolean = true): Result<UserRig> {
         val current = _userState.value
         val now = System.currentTimeMillis()
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(current.secretKey.ifBlank { getActiveKey() ?: "" })
+
+        if (!checkAndUpdatePurchaseLimit(cleanKey, catalogItem.priceUsdt)) {
+            return Result.failure(Exception("Daily purchase limit ($5,000 USDT) reached. Try again tomorrow."))
+        }
 
         if (useWalletBalance && current.minerBalanceUsdt < catalogItem.priceUsdt) {
             return Result.failure(Exception("Insufficient Miner Balance ($${String.format("%.2f", current.minerBalanceUsdt)} USDT)."))
@@ -330,8 +633,18 @@ class MiningRepository(context: Context) {
             totalDays = catalogItem.durationDays
         )
 
-        val cleanKey = SecretKeyUtils.normalizeSecretKey(current.secretKey.ifBlank { getActiveKey() ?: "" })
         deployHardwareRig(cleanKey, node)
+
+        val tx = TransactionItem(
+            id = "tx-${UUID.randomUUID().toString().take(8)}",
+            type = TransactionType.RIG_PURCHASE,
+            amount = catalogItem.priceUsdt,
+            currency = "USDT",
+            timestamp = now,
+            status = TransactionStatus.COMPLETED,
+            description = "Deployed ${catalogItem.name} (${catalogItem.hashrateGh} GH/s) for ${catalogItem.durationDays} Days"
+        )
+        recordCloudTransaction(cleanKey, tx)
 
         val newRig = UserRig(
             id = node.id,
@@ -349,14 +662,12 @@ class MiningRepository(context: Context) {
 
         _userState.value = current.copy(
             minerBalanceUsdt = current.minerBalanceUsdt - catalogItem.priceUsdt,
-            userRigs = listOf(newRig) + current.userRigs
+            userRigs = listOf(newRig) + current.userRigs,
+            transactions = listOf(tx) + current.transactions
         )
         return Result.success(newRig)
     }
 
-    // ==========================================
-    // LUCKY WHEEL REWARD (INCREMENT DIRECTLY)
-    // ==========================================
     fun claimWheelReward(key: String, rewardGrid: Double) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(key)
         _gridBalance.value += rewardGrid
@@ -369,49 +680,39 @@ class MiningRepository(context: Context) {
 
         firestore.collection("users").document(cleanKey).update(
             "gridBalance", FieldValue.increment(rewardGrid),
+            "lastDailySpinTimestamp", System.currentTimeMillis(),
             "lastSyncTimestamp", System.currentTimeMillis()
         )
     }
 
-    fun executeLuckySpin(sector: SpinSector): SpinHistoryRecord {
+    fun depositFunds(amountUsdt: Double, network: String, txHash: String = "0x" + UUID.randomUUID().toString().replace("-", "").take(16)) {
         val current = _userState.value
-        val now = System.currentTimeMillis()
         val cleanKey = SecretKeyUtils.normalizeSecretKey(current.secretKey.ifBlank { getActiveKey() ?: "" })
+        val now = System.currentTimeMillis()
 
-        var newMinerBal = current.minerBalanceUsdt
-        var newGridBal = current.gridBalance
-
-        when (sector.type) {
-            SpinRewardType.GRID_TOKENS -> {
-                newGridBal += sector.value
-                claimWheelReward(cleanKey, sector.value)
-            }
-            SpinRewardType.USDT -> {
-                newMinerBal += sector.value
-                firestore.collection("users").document(cleanKey).update(
-                    "minerBalanceUsdt", FieldValue.increment(sector.value),
-                    "lastSyncTimestamp", now
-                )
-            }
-            else -> {}
-        }
-
-        val record = SpinHistoryRecord(
-            id = "spin-${UUID.randomUUID().toString().take(6)}",
-            rewardTitle = sector.title,
-            rewardSubtitle = sector.subtitle,
+        val tx = TransactionItem(
+            id = "tx-${UUID.randomUUID().toString().take(8)}",
+            type = TransactionType.DEPOSIT,
+            amount = amountUsdt,
+            currency = "USDT",
             timestamp = now,
-            rewardType = sector.type,
-            value = sector.value
+            status = TransactionStatus.COMPLETED,
+            description = "Direct Deposit via $network",
+            network = network,
+            txHash = txHash
         )
 
+        _minerBalance.value = current.minerBalanceUsdt + amountUsdt
         _userState.value = current.copy(
-            minerBalanceUsdt = newMinerBal,
-            gridBalance = newGridBal,
-            lastDailySpinTimestamp = now,
-            spinHistory = listOf(record) + current.spinHistory
+            minerBalanceUsdt = current.minerBalanceUsdt + amountUsdt,
+            transactions = listOf(tx) + current.transactions
         )
-        return record
+
+        firestore.collection("users").document(cleanKey).update(
+            "minerBalanceUsdt", FieldValue.increment(amountUsdt),
+            "lastSyncTimestamp", now
+        )
+        recordCloudTransaction(cleanKey, tx)
     }
 
     // ==========================================
@@ -438,7 +739,6 @@ class MiningRepository(context: Context) {
         )
 
         _userState.value = instantState
-        // Bind Firestore listener immediately (Hydration happens inside listener safely)
         bindUserSession(cleanKey)
         return instantState
     }
@@ -543,7 +843,6 @@ class MiningRepository(context: Context) {
             userRigs = updatedRigs
         )
 
-        // Periodic safe Firestore sync every 20 seconds
         if (now - lastCloudSyncTime > 20000 && isCloudHydrated) {
             lastCloudSyncTime = now
             syncToCloud()
@@ -601,13 +900,17 @@ class MiningRepository(context: Context) {
         _userState.value = _userState.value.copy(minerBalanceUsdt = minerUsdt, gridBalance = grid)
     }
 
-    fun setInstantUserState(state: UserMiningState) {
-        _userState.value = state
-    }
-
+    fun setInstantUserState(state: UserMiningState) { _userState.value = state }
     fun setAppLocked(locked: Boolean) { _userState.value = _userState.value.copy(isAppLocked = locked) }
     fun markSecretKeyBackedUp() { securityPreferences.setSecretKeyBackedUp(true); _userState.value = _userState.value.copy(isKeyBackedUp = true) }
-    fun setPin(pin: String): Boolean = securityPreferences.setPin(pin)
+    fun setPin(pin: String): Boolean {
+        val success = securityPreferences.setPin(pin)
+        if (success) {
+            val key = getActiveKey() ?: _userState.value.secretKey
+            savePinToCloud(key, pin)
+        }
+        return success
+    }
     fun verifyPin(pin: String): Boolean = securityPreferences.verifyPin(pin)
     fun setBiometricEnabled(enabled: Boolean) { securityPreferences.setBiometricEnabled(enabled); _userState.value = _userState.value.copy(isBiometricEnabled = enabled) }
     fun isPinSet(): Boolean = securityPreferences.isPinSet()
@@ -666,10 +969,6 @@ class MiningRepository(context: Context) {
     suspend fun updateGridPrice(newPrice: Double): Boolean = true
     suspend fun syncMinedTokensToFirestore(): Boolean = true
     fun setUserOnline(isOnline: Boolean) {}
-    fun depositFunds(amountUsdt: Double, network: String, txHash: String = "") {}
-    fun requestWithdrawal(amountUsdt: Double, address: String, network: String): Result<TransactionItem> = Result.failure(Exception())
-    fun submitMicroTask(platform: TaskPlatform, initialViews: Int, finalViews: Int, notes: String) {}
-    fun submitVideoPromo(platform: TaskPlatform, url: String, channel: String) {}
     fun simulateDownlinePurchase() {}
     fun simulateNewReferral() {}
     fun approvePendingTasksSimulation() {}
