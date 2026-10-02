@@ -111,9 +111,18 @@ class MiningRepository(context: Context) {
                 return@addSnapshotListener
             }
 
+            if (snapshot == null) return@addSnapshotListener
+
             val now = System.currentTimeMillis()
 
-            if (snapshot == null || !snapshot.exists()) {
+            // REINSTALL PROTECTION: Local cache empty hone par server data ka wait karein
+            if (!snapshot.exists()) {
+                if (snapshot.metadata.isFromCache) {
+                    Log.d("MiningRepository", "Local cache empty on fresh reinstall. Waiting for live server snapshot...")
+                    return@addSnapshotListener
+                }
+
+                // Server confirms user genuinely does not exist: Initialize new profile
                 val isMaster = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
                 val defaultUsdt = if (isMaster) 3000.0 else 0.0
                 val defaultRigs = if (isMaster) listOf(
@@ -129,6 +138,7 @@ class MiningRepository(context: Context) {
                     "gridBalance" to 0.0,
                     "isFreeMiningActive" to false,
                     "freeMiningEndTime" to 0L,
+                    "freeMiningStartTime" to 0L,
                     "hardwareNodes" to defaultRigs,
                     "transactions" to emptyList<Map<String, Any>>(),
                     "securityPin" to "",
@@ -143,7 +153,7 @@ class MiningRepository(context: Context) {
                 return@addSnapshotListener
             }
 
-            // Document Exists: Hydrate All Cloud States (Never Wipe)
+            // SERVER DATA ARRIVED: Hydrate states safely without wiping
             isCloudSynced.value = true
             isCloudHydrated = true
 
@@ -181,7 +191,16 @@ class MiningRepository(context: Context) {
                 }
             }
 
-            // 3. Restore All 6 Cloud-Attached Features
+            // 3. Immediately sync accrued balances back to cloud
+            docRef.update(
+                mapOf(
+                    "minerBalanceUsdt" to usdt,
+                    "gridBalance" to grid,
+                    "lastSyncTimestamp" to now
+                )
+            )
+
+            // 4. Restore transactions, PIN, and parameters
             val rawTxs = snapshot.get("transactions") as? List<Map<String, Any>> ?: emptyList()
             val restoredTransactions = rawTxs.mapNotNull { map ->
                 try {
@@ -207,7 +226,7 @@ class MiningRepository(context: Context) {
                 securityPreferences.setPin(cloudPin)
             }
 
-            // 4. Update UI StateFlows
+            // Update UI StateFlows directly
             _minerBalance.value = usdt
             _gridBalance.value = grid
             _isMiningActive.value = isMiningRunning
@@ -259,7 +278,6 @@ class MiningRepository(context: Context) {
                 isAuthenticated = true
             )
 
-            // Cache to local SharedPreferences
             prefs.edit()
                 .putFloat("miner_balance", usdt.toFloat())
                 .putFloat("grid_balance", grid.toFloat())
@@ -272,10 +290,8 @@ class MiningRepository(context: Context) {
     }
 
     // ========================================================
-    // CLOUD ATTACHMENT FOR ALL 6 PENDING FEATURES
+    // TRANSACTION & CLOUD-ATTACHED UTILITIES
     // ========================================================
-
-    // 1. Transaction History (Cloud Synced)
     fun recordCloudTransaction(secretKey: String, tx: TransactionItem) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
         if (cleanKey.isBlank()) return
@@ -304,7 +320,6 @@ class MiningRepository(context: Context) {
         }
     }
 
-    // 2. 4-Digit PIN Security (Cloud Persistent)
     fun savePinToCloud(secretKey: String, pin: String, onSuccess: () -> Unit = {}) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
         if (cleanKey.isBlank()) return
@@ -321,7 +336,6 @@ class MiningRepository(context: Context) {
         ).addOnSuccessListener { onSuccess() }
     }
 
-    // 3. Daily Lucky Wheel (24H Cloud Lock)
     fun isLuckySpinAvailable(): Boolean {
         val lastSpin = _userState.value.lastDailySpinTimestamp
         return (System.currentTimeMillis() - lastSpin) >= 86400000L
@@ -382,7 +396,6 @@ class MiningRepository(context: Context) {
         return record
     }
 
-    // 4. Promotional Bounties & Tasks (Cloud Submissions)
     fun submitMicroTask(platform: TaskPlatform, initialViews: Int, finalViews: Int, notes: String) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(getActiveKey() ?: _userState.value.secretKey)
         val now = System.currentTimeMillis()
@@ -399,9 +412,7 @@ class MiningRepository(context: Context) {
             notes = notes
         )
 
-        _userState.value = _userState.value.copy(
-            microTasks = listOf(sub) + _userState.value.microTasks
-        )
+        _userState.value = _userState.value.copy(microTasks = listOf(sub) + _userState.value.microTasks)
 
         val subMap = mapOf(
             "id" to sub.id,
@@ -434,9 +445,7 @@ class MiningRepository(context: Context) {
             rewardUsdt = 0.0
         )
 
-        _userState.value = _userState.value.copy(
-            videoPromotions = listOf(sub) + _userState.value.videoPromotions
-        )
+        _userState.value = _userState.value.copy(videoPromotions = listOf(sub) + _userState.value.videoPromotions)
 
         val videoMap = mapOf(
             "id" to sub.id,
@@ -454,7 +463,6 @@ class MiningRepository(context: Context) {
         )
     }
 
-    // 5. Withdrawal Pipeline (Root Withdrawals + User Document)
     fun requestWithdrawal(amountUsdt: Double, address: String, network: String): Result<TransactionItem> {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(getActiveKey() ?: _userState.value.secretKey)
         val current = _userState.value
@@ -488,7 +496,6 @@ class MiningRepository(context: Context) {
         )
         recordCloudTransaction(cleanKey, tx)
 
-        // Add to Root Firestore withdrawals Collection for Admin Hub
         val adminWithdrawalRecord = mapOf(
             "txId" to txId,
             "secretKey" to cleanKey,
@@ -503,7 +510,6 @@ class MiningRepository(context: Context) {
         return Result.success(tx)
     }
 
-    // 6. Daily Purchase Limit Tracker ($5,000 USDT)
     fun checkAndUpdatePurchaseLimit(secretKey: String, purchaseAmount: Double): Boolean {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
         val current = _userState.value
@@ -724,14 +730,18 @@ class MiningRepository(context: Context) {
 
         setActiveKey(cleanKey)
         securityPreferences.setLoggedIn(true)
+        isCloudHydrated = false // Block background push until server snapshot loads
+
+        val cachedUsdt = prefs.getFloat("miner_balance", 0f).toDouble()
+        val cachedGrid = prefs.getFloat("grid_balance", 0f).toDouble()
 
         val instantState = UserMiningState(
             uid = cleanKey,
             secretKey = cleanKey,
             email = if (isAdminKey) "admin@hashgrid.pro" else "miner_${cleanKey.takeLast(4).lowercase()}@hashgrid.pro",
             nodeId = if (isAdminKey) "NODE-SUPERADMIN-#0001" else "NODE-WEB3-#${cleanKey.takeLast(4)}",
-            minerBalanceUsdt = if (isAdminKey) 3000.0 else prefs.getFloat("miner_balance", 0f).toDouble(),
-            gridBalance = prefs.getFloat("grid_balance", 0f).toDouble(),
+            minerBalanceUsdt = if (cachedUsdt > 0.0) cachedUsdt else if (isAdminKey) 3000.0 else 0.0,
+            gridBalance = cachedGrid,
             isAdmin = isAdminKey,
             role = if (isAdminKey) "superadmin" else "user",
             isAuthenticated = true,
@@ -739,6 +749,9 @@ class MiningRepository(context: Context) {
         )
 
         _userState.value = instantState
+        _minerBalance.value = instantState.minerBalanceUsdt
+        _gridBalance.value = instantState.gridBalance
+
         bindUserSession(cleanKey)
         return instantState
     }
@@ -843,6 +856,7 @@ class MiningRepository(context: Context) {
             userRigs = updatedRigs
         )
 
+        // Periodic safe Firestore sync every 20 seconds
         if (now - lastCloudSyncTime > 20000 && isCloudHydrated) {
             lastCloudSyncTime = now
             syncToCloud()
