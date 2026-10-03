@@ -2,6 +2,7 @@ package com.example.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.provider.Settings
 import android.util.Log
 import com.example.data.firebase.FirebaseManager
 import com.example.data.model.*
@@ -11,6 +12,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.coroutines.resume
 import com.example.data.notification.NotificationHelper
 import com.example.data.security.SecretKeyUtils
 import com.example.data.security.SecurityPreferences
@@ -34,6 +36,7 @@ class MiningRepository(context: Context) {
         const val GRID_PRELAUNCH_PRICE_USD = 0.01
         const val TARGET_DAILY_GRID = 302.4
         const val TOKENS_PER_SECOND = (2.0 / 10.0) * (TARGET_DAILY_GRID / 86400.0) // ~0.0007 GRID/s
+        private const val MAX_ACCOUNTS_PER_DEVICE = 2
     }
 
     private val globalPrefs: SharedPreferences = context.getSharedPreferences("hashgrid_global_v2", Context.MODE_PRIVATE)
@@ -104,7 +107,6 @@ class MiningRepository(context: Context) {
         _freeMiningEndTime.value = 0L
     }
 
-    // Exact dictionary parser matching UserMiningState and FirebaseManager
     private fun parseRigMap(map: Map<String, Any>, now: Long): UserRig? {
         return try {
             val id = (map["nodeId"] as? String) ?: (map["id"] as? String) ?: (map["rigId"] as? String) ?: UUID.randomUUID().toString()
@@ -145,9 +147,6 @@ class MiningRepository(context: Context) {
         } catch (_: Exception) { null }
     }
 
-    // ========================================================
-    // BULLETPROOF FIRESTORE BIND (MATCHING DICTIONARY & OFFLINE ACCRUAL)
-    // ========================================================
     fun bindUserSession(secretKey: String) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey)
         if (cleanKey.isBlank()) return
@@ -157,7 +156,6 @@ class MiningRepository(context: Context) {
         val docRef = firestore.collection("users").document(cleanKey)
         val isMaster = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
 
-        // 1. Direct Server Fetch to guarantee truth from cloud
         docRef.get(Source.SERVER).addOnCompleteListener { task ->
             val now = System.currentTimeMillis()
             val snapshot = if (task.isSuccessful) task.result else null
@@ -165,7 +163,6 @@ class MiningRepository(context: Context) {
             if (snapshot != null && snapshot.exists()) {
                 restoreFromCloudWithAccrual(cleanKey, snapshot, isMaster, now)
             } else {
-                // Initial Default User setup (for admin or first time miner)
                 val defaultUsdt = if (isMaster) 3000.0 else 0.0
                 val defaultRigs = if (isMaster) listOf(
                     mapOf("id" to "651", "nodeId" to "651", "name" to "Elite Node #651", "nodeName" to "Elite Node #651", "hashrateGh" to 400.0, "costUsdt" to 1000.0, "priceUsdt" to 1000.0, "totalDays" to 200, "durationDays" to 200, "purchaseTimestamp" to now, "status" to "ACTIVE"),
@@ -243,7 +240,6 @@ class MiningRepository(context: Context) {
         val lastSync = (snapshot.get("lastSyncTimestamp") as? Number)?.toLong() ?: now
         val wasMiningActive = snapshot.getBoolean("isFreeMiningActive") ?: snapshot.getBoolean("isMiningActive") ?: false
 
-        // Offline Free Mining Growth Catch-Up
         if (wasMiningActive && sessionStart > 0L) {
             val effectiveEnd = Math.min(now, sessionEnd)
             if (effectiveEnd > lastSync) {
@@ -253,7 +249,6 @@ class MiningRepository(context: Context) {
         }
         val isStillMining = (now < sessionEnd) && wasMiningActive
 
-        // Offline Hardware Nodes 15% Monthly Yield Catch-Up
         val rawNodes = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>)
             ?: (snapshot.get("activeMiningRigs") as? List<Map<String, Any>>)
             ?: emptyList()
@@ -284,7 +279,6 @@ class MiningRepository(context: Context) {
             securityPreferences.setPin(cloudPin)
         }
 
-        // Push fresh catch-up back to Firestore
         firestore.collection("users").document(cleanKey).set(
             mapOf(
                 "minerBalanceUsdt" to usdt,
@@ -546,7 +540,6 @@ class MiningRepository(context: Context) {
             userRigs = updatedRigs
         )
 
-        // Periodic cloud update every 25 seconds
         if (now - lastCloudSyncTime > 25000) {
             lastCloudSyncTime = now
             firestore.collection("users").document(current.secretKey).set(
@@ -646,6 +639,112 @@ class MiningRepository(context: Context) {
         )
     }
 
+    // ========================================================
+    // SECURE CREATE ACCOUNT: WITH ANTI-BOT DEVICE RATE LIMIT
+    // ========================================================
+    suspend fun createNewAccount(): Result<UserMiningState> = suspendCancellableCoroutine { continuation ->
+        try {
+            val androidId = Settings.Secure.getString(
+                appContext.contentResolver,
+                Settings.Secure.ANDROID_ID
+            ) ?: "unknown_device"
+
+            // 1. Device Rate-Limit Check (Max 2 accounts per physical phone/emulator)
+            val deviceAccountsKey = "dev_acc_count_$androidId"
+            val currentAccountsCount = globalPrefs.getInt(deviceAccountsKey, 0)
+
+            if (currentAccountsCount >= MAX_ACCOUNTS_PER_DEVICE) {
+                if (continuation.isActive) {
+                    continuation.resume(
+                        Result.failure(Exception("Account Limit Reached: Maximum 2 accounts allowed per device to prevent bot farming."))
+                    )
+                }
+                return@suspendCancellableCoroutine
+            }
+
+            // 2. Generate cryptographically strong unique Web3 Secret Key
+            val allowedChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+            val part1 = (1..4).map { allowedChars.random() }.joinToString("")
+            val part2 = (1..4).map { allowedChars.random() }.joinToString("")
+            val part3 = (1..4).map { allowedChars.random() }.joinToString("")
+            val newSecretKey = "HG-$part1-$part2-$part3"
+
+            val now = System.currentTimeMillis()
+
+            // 3. Create fresh user payload for Firestore
+            val initialUserData = hashMapOf(
+                "secretKey" to newSecretKey,
+                "uid" to newSecretKey,
+                "isAdmin" to false,
+                "deviceId" to androidId,
+                "minerBalanceUsdt" to 0.0,
+                "usdtBalance" to 0.0,
+                "gridBalance" to 0.0,
+                "isFreeMiningActive" to false,
+                "isMiningActive" to false,
+                "freeMiningSessionStart" to 0L,
+                "freeMiningSessionEnd" to 0L,
+                "hardwareNodes" to emptyList<Map<String, Any>>(),
+                "transactions" to emptyList<Map<String, Any>>(),
+                "securityPin" to "",
+                "lastDailySpinTimestamp" to 0L,
+                "dailySpentUsdt" to 0.0,
+                "dailySpentResetDate" to now,
+                "lastSyncTimestamp" to now,
+                "createdAt" to now
+            )
+
+            firestore.collection("users").document(newSecretKey)
+                .set(initialUserData, SetOptions.merge())
+                .addOnSuccessListener {
+                    // Increment device counter upon success
+                    globalPrefs.edit().putInt(deviceAccountsKey, currentAccountsCount + 1).apply()
+
+                    setActiveKey(newSecretKey)
+                    securityPreferences.setLoggedIn(true)
+                    securityPreferences.setSecretKeyBackedUp(false)
+
+                    val newState = UserMiningState(
+                        uid = newSecretKey,
+                        secretKey = newSecretKey,
+                        email = "miner_${newSecretKey.takeLast(4).lowercase()}@hashgrid.pro",
+                        nodeId = "NODE-WEB3-#${newSecretKey.takeLast(4)}",
+                        minerBalanceUsdt = 0.0,
+                        gridBalance = 0.0,
+                        userRigs = emptyList(),
+                        isAdmin = false,
+                        role = "user",
+                        isAuthenticated = true,
+                        isKeyBackedUp = false
+                    )
+
+                    _minerBalance.value = 0.0
+                    _gridBalance.value = 0.0
+                    _deployedRigs.value = emptyList()
+                    _deployedNodesCount.value = 0
+                    _isMiningActive.value = false
+                    _freeMiningEndTime.value = 0L
+                    _userState.value = newState
+
+                    bindUserSession(newSecretKey)
+
+                    if (continuation.isActive) {
+                        continuation.resume(Result.success(newState))
+                    }
+                }
+                .addOnFailureListener { err ->
+                    if (continuation.isActive) {
+                        continuation.resume(Result.failure(err))
+                    }
+                }
+        } catch (e: Exception) {
+            Log.e("MiningRepo", "Error creating account: ${e.message}", e)
+            if (continuation.isActive) {
+                continuation.resume(Result.failure(e))
+            }
+        }
+    }
+
     fun startFreeMiningCore(secretKey: String) { startFreeMiningSession() }
     fun deployHardwareRig(secretKey: String, rig: HardwareNode, onSuccess: () -> Unit = {}) { buyRig(RigCatalogItem(rig.id, rig.name, rig.costUsdt, rig.hashrateGh, rig.totalDays)) }
     fun claimWheelReward(key: String, rewardGrid: Double) {}
@@ -660,7 +759,6 @@ class MiningRepository(context: Context) {
     fun adminAdjustUserBalance(newGrid: Double, newUsdt: Double) {}
     fun computeAccruedGridBalance(now: Long = System.currentTimeMillis()): Double = _gridBalance.value
     fun saveGridBalanceOnPause(computedGrid: Double) {}
-    suspend fun createNewAccount(): Result<UserMiningState> = Result.success(_userState.value)
     fun syncAndCatchUpOfflineGrowth(secretKey: String) {}
     fun restoreSessionAsync(key: String) {}
     fun attachUserDocumentRealTimeListener(secretKey: String) {}
