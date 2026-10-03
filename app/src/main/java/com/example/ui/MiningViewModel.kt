@@ -47,7 +47,7 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
     val activeAccount: StateFlow<UserCloudAccount?> = repository.activeAccount.asStateFlow()
     val accountState = repository.activeAccount
 
-    // DIRECT SINGLE-SOURCE STATE FLOWS (100% SYNCED WITH REPOSITORY)
+    // Direct Reactive State Flows directly from Repository Vault
     val minerBalance = repository.minerBalance
     val minerBalanceUsdt: StateFlow<Double> = repository.minerBalance.asStateFlow()
     val gridBalance = repository.gridBalance
@@ -430,25 +430,26 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
         repository.bindUserSession(key)
     }
 
+    // SAFE RESUME: Re-binds to Firestore without blindly overwriting with 0.0
     fun onAppResumed() {
-        val now = System.currentTimeMillis()
-        val recomputedGrid = repository.computeAccruedGridBalance(now)
-        val finalGrid = maxOf(recomputedGrid, gridBalance.value)
-        repository.setLocalBalance(minerBalance.value, finalGrid)
+        val key = userState.value.secretKey.ifBlank { repository.getActiveKey() ?: "" }
+        if (key.isNotBlank()) {
+            repository.bindUserSession(key)
+        }
     }
 
+    // SAFE PAUSE: Safely persists current active state to cloud
     fun onAppPaused() {
-        val now = System.currentTimeMillis()
-        val recomputedGrid = repository.computeAccruedGridBalance(now)
-        val finalGrid = maxOf(recomputedGrid, gridBalance.value)
-        repository.saveGridBalanceOnPause(finalGrid)
+        val key = userState.value.secretKey.ifBlank { repository.getActiveKey() ?: "" }
+        if (key.isNotBlank()) {
+            repository.onAppPaused()
+        }
     }
 
     fun handleLoginOrRestore(inputKey: String) {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(inputKey)
         if (cleanKey.isEmpty()) return
 
-        // 1. Immediately persist key
         repository.setActiveKey(cleanKey)
         val instantState = repository.loginWithKeyInstant(cleanKey)
 
@@ -463,7 +464,6 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
             emitToast("Logged in successfully! Syncing cloud data...")
         }
 
-        // 2. Hydrate from Firestore
         repository.bindUserSession(cleanKey)
     }
 
