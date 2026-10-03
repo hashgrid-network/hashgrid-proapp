@@ -1,21 +1,43 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# ============================================================================
+# HASHGRID PRO - PRODUCTION PROGUARD / R8 OPTIMIZATION & PERSISTENCE RULES
+# ============================================================================
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# 1. Preserve Data Models & Field Names (CRITICAL FOR FIRESTORE SYNC)
+# Prevents R8 from renaming fields like minerBalanceUsdt, userRigs, etc.
+-keep class com.example.data.model.** { *; }
+-keepclassmembers class com.example.data.model.** {
+    <fields>;
+    <methods>;
+}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# 2. Preserve Payment Models & DTOs (NOWPayments Gateway)
+-keep class com.example.data.payment.** { *; }
+-keepclassmembers class com.example.data.payment.** {
+    <fields>;
+    <methods>;
+}
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# 3. Google Firebase & Firestore Serialization Rules
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+-dontwarn com.google.firebase.**
+-keep class com.google.firebase.** { *; }
+-keepclassmembers class com.google.firebase.firestore.** {
+    <fields>;
+    <methods>;
+}
+
+# 4. AndroidX EncryptedSharedPreferences & MasterKey (Tink Crypto)
+-keep class androidx.security.crypto.** { *; }
+-dontwarn androidx.security.crypto.**
+-keep class com.google.crypto.tink.** { *; }
+-dontwarn com.google.crypto.tink.**
+
+# 5. Kotlin Coroutines & StateFlow
+-keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
+-keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
+-keepclassmembers class kotlinx.coroutines.** {
+    volatile <fields>;
+}
+
+# 6. Preserve Line Numbers for Crash Reports & Debugging
+-keepattributes SourceFile,LineNumberTable
