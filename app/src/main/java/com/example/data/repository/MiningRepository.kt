@@ -640,7 +640,7 @@ class MiningRepository(context: Context) {
     }
 
     // ========================================================
-    // SECURE CREATE ACCOUNT: WITH ANTI-BOT DEVICE RATE LIMIT
+    // SECURE CREATE ACCOUNT: CLOUD & HARDWARE DEVICE LIMIT CHECK
     // ========================================================
     suspend fun createNewAccount(): Result<UserMiningState> = suspendCancellableCoroutine { continuation ->
         try {
@@ -649,11 +649,11 @@ class MiningRepository(context: Context) {
                 Settings.Secure.ANDROID_ID
             ) ?: "unknown_device"
 
-            // 1. Device Rate-Limit Check (Max 2 accounts per physical phone/emulator)
             val deviceAccountsKey = "dev_acc_count_$androidId"
-            val currentAccountsCount = globalPrefs.getInt(deviceAccountsKey, 0)
+            val localCount = globalPrefs.getInt(deviceAccountsKey, 0)
 
-            if (currentAccountsCount >= MAX_ACCOUNTS_PER_DEVICE) {
+            // Local cache check
+            if (localCount >= MAX_ACCOUNTS_PER_DEVICE) {
                 if (continuation.isActive) {
                     continuation.resume(
                         Result.failure(Exception("Account Limit Reached: Maximum 2 accounts allowed per device to prevent bot farming."))
@@ -662,80 +662,97 @@ class MiningRepository(context: Context) {
                 return@suspendCancellableCoroutine
             }
 
-            // 2. Generate cryptographically strong unique Web3 Secret Key
-            val allowedChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-            val part1 = (1..4).map { allowedChars.random() }.joinToString("")
-            val part2 = (1..4).map { allowedChars.random() }.joinToString("")
-            val part3 = (1..4).map { allowedChars.random() }.joinToString("")
-            val newSecretKey = "HG-$part1-$part2-$part3"
+            // Cloud Server Verification: Check how many accounts exist with this deviceId in Firestore
+            firestore.collection("users")
+                .whereEqualTo("deviceId", androidId)
+                .get(Source.SERVER)
+                .addOnCompleteListener { checkTask ->
+                    val cloudCount = if (checkTask.isSuccessful) checkTask.result?.size() ?: 0 else 0
+                    val totalDeviceAccounts = Math.max(localCount, cloudCount)
 
-            val now = System.currentTimeMillis()
+                    if (totalDeviceAccounts >= MAX_ACCOUNTS_PER_DEVICE) {
+                        globalPrefs.edit().putInt(deviceAccountsKey, totalDeviceAccounts).apply()
+                        if (continuation.isActive) {
+                            continuation.resume(
+                                Result.failure(Exception("Account Limit Reached: Maximum 2 accounts allowed per device to prevent bot farming."))
+                            )
+                        }
+                        return@addOnCompleteListener
+                    }
 
-            // 3. Create fresh user payload for Firestore
-            val initialUserData = hashMapOf(
-                "secretKey" to newSecretKey,
-                "uid" to newSecretKey,
-                "isAdmin" to false,
-                "deviceId" to androidId,
-                "minerBalanceUsdt" to 0.0,
-                "usdtBalance" to 0.0,
-                "gridBalance" to 0.0,
-                "isFreeMiningActive" to false,
-                "isMiningActive" to false,
-                "freeMiningSessionStart" to 0L,
-                "freeMiningSessionEnd" to 0L,
-                "hardwareNodes" to emptyList<Map<String, Any>>(),
-                "transactions" to emptyList<Map<String, Any>>(),
-                "securityPin" to "",
-                "lastDailySpinTimestamp" to 0L,
-                "dailySpentUsdt" to 0.0,
-                "dailySpentResetDate" to now,
-                "lastSyncTimestamp" to now,
-                "createdAt" to now
-            )
+                    // Generate cryptographically strong unique Web3 Secret Key
+                    val allowedChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+                    val part1 = (1..4).map { allowedChars.random() }.joinToString("")
+                    val part2 = (1..4).map { allowedChars.random() }.joinToString("")
+                    val part3 = (1..4).map { allowedChars.random() }.joinToString("")
+                    val newSecretKey = "HG-$part1-$part2-$part3"
 
-            firestore.collection("users").document(newSecretKey)
-                .set(initialUserData, SetOptions.merge())
-                .addOnSuccessListener {
-                    // Increment device counter upon success
-                    globalPrefs.edit().putInt(deviceAccountsKey, currentAccountsCount + 1).apply()
+                    val now = System.currentTimeMillis()
 
-                    setActiveKey(newSecretKey)
-                    securityPreferences.setLoggedIn(true)
-                    securityPreferences.setSecretKeyBackedUp(false)
-
-                    val newState = UserMiningState(
-                        uid = newSecretKey,
-                        secretKey = newSecretKey,
-                        email = "miner_${newSecretKey.takeLast(4).lowercase()}@hashgrid.pro",
-                        nodeId = "NODE-WEB3-#${newSecretKey.takeLast(4)}",
-                        minerBalanceUsdt = 0.0,
-                        gridBalance = 0.0,
-                        userRigs = emptyList(),
-                        isAdmin = false,
-                        role = "user",
-                        isAuthenticated = true,
-                        isKeyBackedUp = false
+                    val initialUserData = hashMapOf(
+                        "secretKey" to newSecretKey,
+                        "uid" to newSecretKey,
+                        "isAdmin" to false,
+                        "deviceId" to androidId,
+                        "minerBalanceUsdt" to 0.0,
+                        "usdtBalance" to 0.0,
+                        "gridBalance" to 0.0,
+                        "isFreeMiningActive" to false,
+                        "isMiningActive" to false,
+                        "freeMiningSessionStart" to 0L,
+                        "freeMiningSessionEnd" to 0L,
+                        "hardwareNodes" to emptyList<Map<String, Any>>(),
+                        "transactions" to emptyList<Map<String, Any>>(),
+                        "securityPin" to "",
+                        "lastDailySpinTimestamp" to 0L,
+                        "dailySpentUsdt" to 0.0,
+                        "dailySpentResetDate" to now,
+                        "lastSyncTimestamp" to now,
+                        "createdAt" to now
                     )
 
-                    _minerBalance.value = 0.0
-                    _gridBalance.value = 0.0
-                    _deployedRigs.value = emptyList()
-                    _deployedNodesCount.value = 0
-                    _isMiningActive.value = false
-                    _freeMiningEndTime.value = 0L
-                    _userState.value = newState
+                    firestore.collection("users").document(newSecretKey)
+                        .set(initialUserData, SetOptions.merge())
+                        .addOnSuccessListener {
+                            globalPrefs.edit().putInt(deviceAccountsKey, totalDeviceAccounts + 1).apply()
 
-                    bindUserSession(newSecretKey)
+                            setActiveKey(newSecretKey)
+                            securityPreferences.setLoggedIn(true)
+                            securityPreferences.setSecretKeyBackedUp(false)
 
-                    if (continuation.isActive) {
-                        continuation.resume(Result.success(newState))
-                    }
-                }
-                .addOnFailureListener { err ->
-                    if (continuation.isActive) {
-                        continuation.resume(Result.failure(err))
-                    }
+                            val newState = UserMiningState(
+                                uid = newSecretKey,
+                                secretKey = newSecretKey,
+                                email = "miner_${newSecretKey.takeLast(4).lowercase()}@hashgrid.pro",
+                                nodeId = "NODE-WEB3-#${newSecretKey.takeLast(4)}",
+                                minerBalanceUsdt = 0.0,
+                                gridBalance = 0.0,
+                                userRigs = emptyList(),
+                                isAdmin = false,
+                                role = "user",
+                                isAuthenticated = true,
+                                isKeyBackedUp = false
+                            )
+
+                            _minerBalance.value = 0.0
+                            _gridBalance.value = 0.0
+                            _deployedRigs.value = emptyList()
+                            _deployedNodesCount.value = 0
+                            _isMiningActive.value = false
+                            _freeMiningEndTime.value = 0L
+                            _userState.value = newState
+
+                            bindUserSession(newSecretKey)
+
+                            if (continuation.isActive) {
+                                continuation.resume(Result.success(newState))
+                            }
+                        }
+                        .addOnFailureListener { err ->
+                            if (continuation.isActive) {
+                                continuation.resume(Result.failure(err))
+                            }
+                        }
                 }
         } catch (e: Exception) {
             Log.e("MiningRepo", "Error creating account: ${e.message}", e)
@@ -745,13 +762,193 @@ class MiningRepository(context: Context) {
         }
     }
 
+    // ========================================================
+    // WITHDRAWAL & DEPOSIT ENGINE: LIVE FIRESTORE ACCRUAL
+    // ========================================================
+    fun requestWithdrawal(amountUsdt: Double, address: String, network: String): Result<TransactionItem> {
+        val current = _userState.value
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(current.secretKey.ifBlank { getActiveKey() ?: return Result.failure(Exception("User not authenticated")) })
+
+        if (amountUsdt <= 0) {
+            return Result.failure(Exception("Invalid withdrawal amount"))
+        }
+        if (current.minerBalanceUsdt < amountUsdt) {
+            return Result.failure(Exception("Insufficient withdrawable balance. Available: $${String.format("%.2f", current.minerBalanceUsdt)}"))
+        }
+        if (address.isBlank()) {
+            return Result.failure(Exception("Please enter a valid destination address"))
+        }
+
+        val now = System.currentTimeMillis()
+        val newBalance = (current.minerBalanceUsdt - amountUsdt).coerceAtLeast(0.0)
+
+        val tx = TransactionItem(
+            id = "tx-wd-${UUID.randomUUID().toString().take(8)}",
+            type = TransactionType.WITHDRAWAL,
+            amount = amountUsdt,
+            currency = "USDT",
+            timestamp = now,
+            status = TransactionStatus.PENDING,
+            description = "Withdrawal to ${address.take(6)}...${address.takeLast(4)} ($network)",
+            network = network,
+            txHash = ""
+        )
+
+        _minerBalance.value = newBalance
+        _userState.value = current.copy(
+            minerBalanceUsdt = newBalance,
+            transactions = listOf(tx) + current.transactions
+        )
+
+        firestore.collection("users").document(cleanKey).set(
+            mapOf(
+                "minerBalanceUsdt" to newBalance,
+                "usdtBalance" to newBalance,
+                "lastSyncTimestamp" to now
+            ),
+            SetOptions.merge()
+        )
+        recordCloudTransaction(cleanKey, tx)
+
+        // Record in transactions collection for admin dashboard approval
+        val adminTx = hashMapOf(
+            "id" to tx.id,
+            "secretKey" to cleanKey,
+            "type" to "WITHDRAWAL",
+            "amount" to amountUsdt,
+            "currency" to "USDT",
+            "destinationAddress" to address,
+            "network" to network,
+            "status" to "PENDING",
+            "timestamp" to now
+        )
+        firestore.collection("transactions").document(tx.id).set(adminTx, SetOptions.merge())
+
+        return Result.success(tx)
+    }
+
+    fun depositFunds(amountUsdt: Double, network: String, txHash: String = "") {
+        val current = _userState.value
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(current.secretKey.ifBlank { getActiveKey() ?: return })
+        if (amountUsdt <= 0) return
+
+        val now = System.currentTimeMillis()
+        val newBalance = current.minerBalanceUsdt + amountUsdt
+
+        val tx = TransactionItem(
+            id = "tx-dep-${UUID.randomUUID().toString().take(8)}",
+            type = TransactionType.DEPOSIT,
+            amount = amountUsdt,
+            currency = "USDT",
+            timestamp = now,
+            status = TransactionStatus.COMPLETED,
+            description = "Direct Deposit via $network",
+            network = network,
+            txHash = txHash
+        )
+
+        _minerBalance.value = newBalance
+        _userState.value = current.copy(
+            minerBalanceUsdt = newBalance,
+            transactions = listOf(tx) + current.transactions
+        )
+
+        firestore.collection("users").document(cleanKey).set(
+            mapOf(
+                "minerBalanceUsdt" to newBalance,
+                "usdtBalance" to newBalance,
+                "lastSyncTimestamp" to now
+            ),
+            SetOptions.merge()
+        )
+        recordCloudTransaction(cleanKey, tx)
+    }
+
+    // ========================================================
+    // LUCKY WHEEL REWARD ENGINE: REAL GRID ACCRUAL
+    // ========================================================
+    fun claimWheelReward(key: String, rewardGrid: Double) {
+        val current = _userState.value
+        val activeKey = key.ifBlank { current.secretKey.ifBlank { getActiveKey() ?: "" } }
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(activeKey)
+        if (cleanKey.isBlank() || rewardGrid <= 0) return
+
+        val now = System.currentTimeMillis()
+        val updatedGrid = current.gridBalance + rewardGrid
+
+        _gridBalance.value = updatedGrid
+        _userState.value = current.copy(
+            gridBalance = updatedGrid,
+            lastDailySpinTimestamp = now
+        )
+
+        firestore.collection("users").document(cleanKey).set(
+            mapOf(
+                "gridBalance" to updatedGrid,
+                "lastDailySpinTimestamp" to now,
+                "lastSyncTimestamp" to now
+            ),
+            SetOptions.merge()
+        )
+    }
+
+    fun isLuckySpinAvailable(): Boolean {
+        val now = System.currentTimeMillis()
+        val lastSpin = _userState.value.lastDailySpinTimestamp
+        return (now - lastSpin) >= 86400000L
+    }
+
+    fun executeLuckySpin(sector: SpinSector): SpinHistoryRecord {
+        val now = System.currentTimeMillis()
+        val current = _userState.value
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(current.secretKey.ifBlank { getActiveKey() ?: "" })
+
+        var newGrid = current.gridBalance
+        var newUsdt = current.minerBalanceUsdt
+
+        when (sector.type) {
+            SpinRewardType.GRID_TOKENS -> {
+                newGrid += sector.amount
+                _gridBalance.value = newGrid
+            }
+            SpinRewardType.USDT_BONUS -> {
+                newUsdt += sector.amount
+                _minerBalance.value = newUsdt
+            }
+            else -> {}
+        }
+
+        _userState.value = current.copy(
+            gridBalance = newGrid,
+            minerBalanceUsdt = newUsdt,
+            lastDailySpinTimestamp = now
+        )
+
+        if (cleanKey.isNotBlank()) {
+            firestore.collection("users").document(cleanKey).set(
+                mapOf(
+                    "gridBalance" to newGrid,
+                    "minerBalanceUsdt" to newUsdt,
+                    "usdtBalance" to newUsdt,
+                    "lastDailySpinTimestamp" to now,
+                    "lastSyncTimestamp" to now
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        return SpinHistoryRecord(
+            id = UUID.randomUUID().toString().take(8),
+            userId = cleanKey,
+            rigId = "",
+            timestamp = now,
+            rewardType = sector.type,
+            rewardAmount = sector.amount
+        )
+    }
+
     fun startFreeMiningCore(secretKey: String) { startFreeMiningSession() }
     fun deployHardwareRig(secretKey: String, rig: HardwareNode, onSuccess: () -> Unit = {}) { buyRig(RigCatalogItem(rig.id, rig.name, rig.costUsdt, rig.hashrateGh, rig.totalDays)) }
-    fun claimWheelReward(key: String, rewardGrid: Double) {}
-    fun executeLuckySpin(sector: SpinSector): SpinHistoryRecord = SpinHistoryRecord("", "", "", 0L, SpinRewardType.GRID_TOKENS, 0.0)
-    fun isLuckySpinAvailable(): Boolean = false
-    fun depositFunds(amountUsdt: Double, network: String, txHash: String = "") {}
-    fun requestWithdrawal(amountUsdt: Double, address: String, network: String): Result<TransactionItem> = Result.failure(Exception())
     fun restoreAccount(key: String, onComplete: (Boolean) -> Unit) { loginWithKeyInstant(key); onComplete(true) }
     fun initializeOrRestoreUser(key: String, onComplete: (Boolean) -> Unit) { loginWithKeyInstant(key); onComplete(true) }
     suspend fun restoreAccountWithSecretKey(secretKey: String): Result<UserMiningState> = Result.success(loginWithKeyInstant(secretKey))
