@@ -901,13 +901,15 @@ class MiningRepository(context: Context) {
             "Grid Reward",
             System.currentTimeMillis(),
             SpinRewardType.GRID_TOKENS,
-            0.0,
-            "Spin reward processed"
+            0.0
         )
     }
 
     fun startFreeMiningCore(secretKey: String) { startFreeMiningSession() }
-    fun deployHardwareRig(secretKey: String, rig: HardwareNode, onSuccess: () -> Unit = {}) { buyRig(RigCatalogItem(rig.id, rig.name, rig.costUsdt, rig.hashrateGh, rig.totalDays)) }
+    fun deployHardwareRig(secretKey: String, rig: HardwareNode, onSuccess: () -> Unit = {}) { 
+        buyRig(RigCatalogItem(rig.id, rig.name, rig.costUsdt, rig.hashrateGh, rig.totalDays, rig.name))
+        onSuccess()
+    }
     fun restoreAccount(key: String, onComplete: (Boolean) -> Unit) { loginWithKeyInstant(key); onComplete(true) }
     fun initializeOrRestoreUser(key: String, onComplete: (Boolean) -> Unit) { loginWithKeyInstant(key); onComplete(true) }
     suspend fun restoreAccountWithSecretKey(secretKey: String): Result<UserMiningState> = Result.success(loginWithKeyInstant(secretKey))
