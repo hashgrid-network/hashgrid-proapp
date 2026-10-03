@@ -906,10 +906,61 @@ class MiningRepository(context: Context) {
     }
 
     fun startFreeMiningCore(secretKey: String) { startFreeMiningSession() }
-    fun deployHardwareRig(secretKey: String, rig: HardwareNode, onSuccess: () -> Unit = {}) { 
-        buyRig(RigCatalogItem(rig.id, rig.name, rig.costUsdt, rig.hashrateGh, rig.totalDays, rig.name))
+
+    // Direct hardware deployment: bypasses RigCatalogItem dummy constructor
+    fun deployHardwareRig(secretKey: String, rig: HardwareNode, onSuccess: () -> Unit = {}) {
+        val current = _userState.value
+        val now = System.currentTimeMillis()
+        val cleanKey = SecretKeyUtils.normalizeSecretKey(secretKey.ifBlank { current.secretKey.ifBlank { getActiveKey() ?: "" } })
+
+        val rigMap = mapOf(
+            "id" to rig.id,
+            "nodeId" to rig.id,
+            "name" to rig.name,
+            "nodeName" to rig.name,
+            "hashrateGh" to rig.hashrateGh,
+            "costUsdt" to rig.costUsdt,
+            "priceUsdt" to rig.costUsdt,
+            "purchaseTimestamp" to (if (rig.deployedTimestamp > 0) rig.deployedTimestamp else now),
+            "totalDays" to rig.totalDays,
+            "durationDays" to rig.totalDays,
+            "status" to "ACTIVE"
+        )
+
+        val updatedRigsRaw = _deployedRigs.value + rigMap
+        _deployedRigs.value = updatedRigsRaw
+        _deployedNodesCount.value = updatedRigsRaw.size
+
+        val newRig = UserRig(
+            id = rig.id,
+            catalogId = "rig-custom",
+            name = rig.name,
+            priceUsdt = rig.costUsdt,
+            hashrateGh = rig.hashrateGh,
+            purchaseTimestamp = now,
+            durationDays = rig.totalDays,
+            status = RigStatus.ACTIVE,
+            totalReceivedUsdt = 0.0,
+            thisMonthEarnedUsdt = 0.0,
+            lastYieldCalculatedTimestamp = now
+        )
+
+        _userState.value = current.copy(
+            userRigs = listOf(newRig) + current.userRigs
+        )
+
+        if (cleanKey.isNotBlank()) {
+            firestore.collection("users").document(cleanKey).set(
+                mapOf(
+                    "hardwareNodes" to FieldValue.arrayUnion(rigMap),
+                    "lastSyncTimestamp" to now
+                ),
+                SetOptions.merge()
+            )
+        }
         onSuccess()
     }
+
     fun restoreAccount(key: String, onComplete: (Boolean) -> Unit) { loginWithKeyInstant(key); onComplete(true) }
     fun initializeOrRestoreUser(key: String, onComplete: (Boolean) -> Unit) { loginWithKeyInstant(key); onComplete(true) }
     suspend fun restoreAccountWithSecretKey(secretKey: String): Result<UserMiningState> = Result.success(loginWithKeyInstant(secretKey))
