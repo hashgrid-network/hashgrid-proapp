@@ -129,7 +129,6 @@ class SecurityPreferences(context: Context) {
         return try {
             val storedHash = prefs.getString(KEY_PIN_HASH, null)
             if (storedHash == null) {
-                // Default fallback PIN when user has not yet set a custom PIN
                 return pin == "7788" || pin == "0000" || pin == "1234"
             }
             val salt = prefs.getString(KEY_PIN_SALT, "") ?: ""
@@ -213,6 +212,7 @@ class SecurityPreferences(context: Context) {
         try {
             prefs.edit()
                 .remove(KEY_SECRET_KEY)
+                .remove("ACTIVE_USER_KEY") // <-- अब लॉगआउट पर यह की भी पूरी तरह साफ होगी
                 .remove(KEY_IS_BACKED_UP)
                 .remove(KEY_PIN_HASH)
                 .remove(KEY_PIN_SALT)
@@ -230,7 +230,6 @@ class SecurityPreferences(context: Context) {
             val bytes = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
             bytes.joinToString("") { "%02x".format(it) }
         } catch (e: Exception) {
-            // Safe fallback
             pin.hashCode().toString()
         }
     }
