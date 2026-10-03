@@ -1,47 +1,61 @@
 package com.example
 
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.Crossfade
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.ui.AppNavTab
-import com.example.ui.MiningViewModel
-import com.example.ui.UiEvent
-import com.example.ui.components.*
-import com.example.ui.screens.*
-import com.example.ui.theme.HashGridTheme
-import com.example.ui.theme.ObsidianBg
-import kotlinx.coroutines.flow.collectLatest
-
 import android.Manifest
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.platform.LocalContext
-import com.example.data.notification.NotificationHelper
-
 import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Build
+import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.notification.NotificationHelper
+import com.example.ui.AppNavTab
+import com.example.ui.MiningViewModel
+import com.example.ui.UiEvent
+import com.example.ui.components.*
 import com.example.ui.components.security.*
+import com.example.ui.screens.*
+import com.example.ui.theme.HashGridTheme
+import com.example.ui.theme.ObsidianBg
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreSettings
+import com.google.firebase.firestore.PersistentCacheSettings
+import kotlinx.coroutines.flow.collectLatest
 
 class MainActivity : AppCompatActivity() {
 
@@ -60,27 +74,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 1. Google Live Firebase Initialization (hashgrid-b850b)
         try {
-            if (com.google.firebase.FirebaseApp.getApps(this).isEmpty()) {
-                val options = com.google.firebase.FirebaseOptions.Builder()
-                    .setProjectId("hashgrid-pro")
-                    .setApplicationId("1:713000000000:android:hashgridpro123456")
-                    .setApiKey("AIzaSyDummyKeyForHashGridProTestingOnly999")
+            if (FirebaseApp.getApps(this).isEmpty()) {
+                val options = FirebaseOptions.Builder()
+                    .setApiKey("AIzaSyBCR8ab9HAOEYRtQ1HY94fxm7FFweqsx3M")
+                    .setApplicationId("1:621346408367:android:c0c569afddabd2695a915a")
+                    .setProjectId("hashgrid-b850b")
+                    .setDatabaseUrl("https://hashgrid-b850b-default-rtdb.asia-southeast1.firebasedatabase.app")
+                    .setStorageBucket("hashgrid-b850b.firebasestorage.app")
+                    .setGcmSenderId("621346408367")
                     .build()
-                com.google.firebase.FirebaseApp.initializeApp(this, options)
-                Log.i("FIREBASE_INIT", "Programmatic fallback initialized successfully")
+                FirebaseApp.initializeApp(this, options)
+                Log.i("FIREBASE_INIT", "Connected directly to Google Live Project: hashgrid-b850b")
             }
         } catch (e: Exception) {
-            android.util.Log.e("FIREBASE_INIT", "Initialization fallback error", e)
+            Log.e("FIREBASE_INIT", "Firebase explicit initialization note: ${e.message}", e)
         }
 
+        // 2. Configure Firestore Offline Persistence & Server Cache
         try {
-            val settings = com.google.firebase.firestore.FirebaseFirestoreSettings.Builder()
-                .setPersistenceEnabled(true)
+            val db = FirebaseFirestore.getInstance()
+            val settings = FirebaseFirestoreSettings.Builder()
+                .setLocalCacheSettings(PersistentCacheSettings.newBuilder().build())
                 .build()
-            com.google.firebase.firestore.FirebaseFirestore.getInstance().firestoreSettings = settings
+            db.firestoreSettings = settings
+            Log.i("FIREBASE_INIT", "Firestore Persistent Cache configured.")
         } catch (e: Exception) {
-            // already set
+            Log.w("FIREBASE_INIT", "Firestore settings configuration note: ${e.message}")
         }
 
         super.onCreate(savedInstanceState)
@@ -97,13 +118,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         enableEdgeToEdge()
-
-        try {
-            com.google.firebase.FirebaseApp.initializeApp(this)
-            Log.i("FIREBASE_INIT", "FirebaseApp successfully explicitly initialized")
-        } catch (e: Exception) {
-            Log.e("FIREBASE_INIT", "FirebaseApp initialization error: ${e.message}", e)
-        }
 
         try {
             NotificationHelper.createNotificationChannels(this)
@@ -170,6 +184,49 @@ fun MainApp(
     val context = LocalContext.current
     val userState by viewModel.userState.collectAsStateWithLifecycle()
 
+    // Real-Time Network Connectivity Listener
+    var isOnline by remember {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val activeNet = cm?.activeNetwork
+        val caps = cm?.getNetworkCapabilities(activeNet)
+        mutableStateOf(caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true)
+    }
+
+    DisposableEffect(context) {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                isOnline = true
+                viewModel.onAppResumed()
+            }
+
+            override fun onLost(network: Network) {
+                isOnline = false
+            }
+
+            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                val hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                isOnline = hasInternet
+            }
+        }
+
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+
+        try {
+            cm?.registerNetworkCallback(request, callback)
+        } catch (e: Throwable) {
+            Log.w("MainActivity", "Network callback registration note: ${e.message}")
+        }
+
+        onDispose {
+            try {
+                cm?.unregisterNetworkCallback(callback)
+            } catch (_: Throwable) {}
+        }
+    }
+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { _ -> }
@@ -210,14 +267,12 @@ fun MainApp(
     val showTaskPolicy by viewModel.showTaskPolicyDialog.collectAsStateWithLifecycle()
     val showGridLocked by viewModel.showGridLockedDialog.collectAsStateWithLifecycle()
 
-    // Security & Web3 States
     val showSecretKeyBackup by viewModel.showSecretKeyBackupModal.collectAsStateWithLifecycle()
     val showSecretKeyRestore by viewModel.showSecretKeyRestoreModal.collectAsStateWithLifecycle()
     val showPinSetup by viewModel.showPinSetupModal.collectAsStateWithLifecycle()
     val showAdminControlHub by viewModel.showAdminControlHubDialog.collectAsStateWithLifecycle()
     val isRestoringAccount by viewModel.isRestoringAccount.collectAsStateWithLifecycle()
 
-    // NOWPayments State
     val activePayment by viewModel.activePaymentSession.collectAsStateWithLifecycle()
     val showGatewayModal by viewModel.showPaymentGatewayModal.collectAsStateWithLifecycle()
     val showSuccessDialog by viewModel.showPaymentSuccessDialog.collectAsStateWithLifecycle()
@@ -239,13 +294,52 @@ fun MainApp(
         }
     }
 
-    // AUTH GATEWAY: Seamless transition based on active user authentication
+    LaunchedEffect(isOnline) {
+        if (!isOnline) {
+            snackbarHostState.showSnackbar("⚠️ No Internet Connection. Cloud sync is paused.")
+        } else {
+            viewModel.onAppResumed()
+        }
+    }
+
+    // AUTH GATEWAY
     if (!userState.isAuthenticated || userState.secretKey.isBlank()) {
-        WelcomeAuthScreen(
-            isLoading = false,
-            onCreateAccount = { viewModel.createNewAccount() },
-            onRestoreAccount = { key -> viewModel.loginWithKey(key) }
-        )
+        Column(modifier = Modifier.fillMaxSize()) {
+            AnimatedVisibility(visible = !isOnline) {
+                Surface(
+                    color = Color(0xFFDC2626),
+                    modifier = Modifier.fillMaxWidth().statusBarsPadding()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.WifiOff,
+                            contentDescription = "No Internet",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "NO INTERNET CONNECTION (AIRPLANE MODE)",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                    }
+                }
+            }
+            WelcomeAuthScreen(
+                isLoading = false,
+                onCreateAccount = { viewModel.createNewAccount() },
+                onRestoreAccount = { key -> viewModel.loginWithKey(key) }
+            )
+        }
         return
     }
 
@@ -264,14 +358,51 @@ fun MainApp(
             )
         },
         topBar = {
-            TopHeaderBar(
-                nodeId = userState.nodeId,
-                isColdStorageSynced = userState.isColdStorageSynced,
-                preLaunchPriceUsd = gridPriceUsd,
-                isCloudSynced = isCloudSynced,
-                connectionErrorMsg = connectionErrorMsg,
-                modifier = Modifier.statusBarsPadding()
-            )
+            Column(modifier = Modifier.statusBarsPadding()) {
+                TopHeaderBar(
+                    nodeId = userState.nodeId,
+                    isColdStorageSynced = userState.isColdStorageSynced,
+                    preLaunchPriceUsd = gridPriceUsd,
+                    isCloudSynced = isOnline && isCloudSynced,
+                    connectionErrorMsg = if (!isOnline) "No Internet (Airplane Mode)" else connectionErrorMsg,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                AnimatedVisibility(
+                    visible = !isOnline,
+                    enter = expandVertically(),
+                    exit = shrinkVertically()
+                ) {
+                    Surface(
+                        color = Color(0xFFDC2626),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WifiOff,
+                                contentDescription = "No Internet",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "NO INTERNET CONNECTION • Cloud Sync Paused",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                            )
+                        }
+                    }
+                }
+            }
         },
         bottomBar = {
             BottomNavBar(
@@ -281,7 +412,7 @@ fun MainApp(
             )
         },
         containerColor = ObsidianBg,
-        contentColor = androidx.compose.ui.graphics.Color.White
+        contentColor = Color.White
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -354,7 +485,6 @@ fun MainApp(
         }
     }
 
-    // Common Dialogs & Modals
     if (showDeposit) {
         DepositDialog(
             onDismiss = { viewModel.showDepositDialog.value = false },
@@ -427,7 +557,6 @@ fun MainApp(
         )
     }
 
-    // 👑 Super Admin Control Hub Modal
     if (showAdminControlHub) {
         AdminControlHubDialog(
             userState = userState,
@@ -441,7 +570,6 @@ fun MainApp(
         )
     }
 
-    // NOWPayments In-App Gateway Modal
     if (showGatewayModal && activePayment != null) {
         NowPaymentsGatewayDialog(
             payment = activePayment!!,
@@ -452,7 +580,6 @@ fun MainApp(
         )
     }
 
-    // Payment Success Confirmation Modal
     if (showSuccessDialog && lastConfirmedPayment != null) {
         PaymentSuccessDialog(
             payment = lastConfirmedPayment,
@@ -460,7 +587,6 @@ fun MainApp(
         )
     }
 
-    // Web3 Secret Key Backup Modal
     if (showSecretKeyBackup) {
         SecretKeyBackupModal(
             secretKey = userState.secretKey,
@@ -469,7 +595,6 @@ fun MainApp(
         )
     }
 
-    // Web3 Secret Key Restore Modal
     if (showSecretKeyRestore) {
         SecretKeyRestoreModal(
             isLoading = isRestoringAccount,
@@ -478,7 +603,6 @@ fun MainApp(
         )
     }
 
-    // 4-Digit PIN & Biometric Setup Modal
     if (showPinSetup) {
         PinSetupModal(
             onDismiss = { viewModel.showPinSetupModal.value = false },
@@ -489,7 +613,6 @@ fun MainApp(
         )
     }
 
-    // Smart Device Lock Screen Overlay
     if (userState.isAppLocked) {
         LockScreenOverlay(
             isBiometricEnabled = userState.isBiometricEnabled,
