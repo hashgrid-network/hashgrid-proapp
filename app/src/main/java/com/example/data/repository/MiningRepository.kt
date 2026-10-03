@@ -34,9 +34,12 @@ class MiningRepository(context: Context) {
 
     companion object {
         const val GRID_PRELAUNCH_PRICE_USD = 0.01
-        const val TARGET_DAILY_GRID = 302.4
-        const val TOKENS_PER_SECOND = (2.0 / 10.0) * (TARGET_DAILY_GRID / 86400.0) // ~0.0007 GRID/s
-        private const val MAX_ACCOUNTS_PER_DEVICE = 2
+        // EXACT BASE YIELD: 4.0 GRID TOKENS PER 24 HOURS AT 2.0 GH/s
+        const val BASE_DAILY_GRID = 4.0
+        const val BASE_HASHRATE_GH = 2.0
+        const val MAX_FREE_HASHRATE_GH = 10.0
+        const val HASH_BOOST_PER_REFERRAL = 0.50 // +0.50 GH/s per active referral
+        const val MAX_ACCOUNTS_PER_DEVICE = 2
     }
 
     private val globalPrefs: SharedPreferences = context.getSharedPreferences("hashgrid_global_v2", Context.MODE_PRIVATE)
@@ -60,6 +63,7 @@ class MiningRepository(context: Context) {
     val cryptoPrices: StateFlow<List<CryptoTickerPrice>> = _cryptoPrices.asStateFlow()
 
     private var lastCloudSyncTime = System.currentTimeMillis()
+    private var lastTickTimestamp = System.currentTimeMillis()
     @Volatile private var isCloudHydrated = false
 
     private val firestore = FirebaseFirestore.getInstance()
@@ -80,6 +84,10 @@ class MiningRepository(context: Context) {
     val _gridBalance = gridBalance
     val minerBalance = MutableStateFlow(0.0)
     val _minerBalance = minerBalance
+
+    // LIVE CLOUD-SYNCED HASHRATE & REFERRALS
+    val referralCount = MutableStateFlow(0)
+    val currentHashrateGh = MutableStateFlow(BASE_HASHRATE_GH)
 
     val isCloudSynced = MutableStateFlow(false)
     val connectionErrorMsg = MutableStateFlow<String?>(null)
@@ -105,6 +113,18 @@ class MiningRepository(context: Context) {
         _gridBalance.value = 0.0
         _isMiningActive.value = false
         _freeMiningEndTime.value = 0L
+        referralCount.value = 0
+        currentHashrateGh.value = BASE_HASHRATE_GH
+    }
+
+    private fun computeEffectiveHashrate(refCount: Int): Double {
+        val boost = refCount * HASH_BOOST_PER_REFERRAL
+        return (BASE_HASHRATE_GH + boost).coerceIn(BASE_HASHRATE_GH, MAX_FREE_HASHRATE_GH)
+    }
+
+    private fun getTokensPerSecond(hashrateGh: Double): Double {
+        val speedMultiplier = hashrateGh / BASE_HASHRATE_GH
+        return (BASE_DAILY_GRID / 86400.0) * speedMultiplier
     }
 
     private fun parseRigMap(map: Map<String, Any>, now: Long): UserRig? {
@@ -184,6 +204,8 @@ class MiningRepository(context: Context) {
                     "hardwareNodes" to defaultRigs,
                     "transactions" to emptyList<Map<String, Any>>(),
                     "securityPin" to "",
+                    "referralCount" to 0,
+                    "freeHashrateGh" to BASE_HASHRATE_GH,
                     "lastDailySpinTimestamp" to 0L,
                     "dailySpentUsdt" to 0.0,
                     "dailySpentResetDate" to now,
@@ -195,6 +217,8 @@ class MiningRepository(context: Context) {
                 _gridBalance.value = 0.0
                 _deployedRigs.value = defaultRigs
                 _deployedNodesCount.value = defaultRigs.size
+                referralCount.value = 0
+                currentHashrateGh.value = BASE_HASHRATE_GH
 
                 val userRigsList = defaultRigs.mapNotNull { parseRigMap(it, now) }
                 _userState.value = _userState.value.copy(
@@ -240,11 +264,20 @@ class MiningRepository(context: Context) {
         val lastSync = (snapshot.get("lastSyncTimestamp") as? Number)?.toLong() ?: now
         val wasMiningActive = snapshot.getBoolean("isFreeMiningActive") ?: snapshot.getBoolean("isMiningActive") ?: false
 
+        val cloudRefCount = (snapshot.get("referralCount") as? Number)?.toInt()
+            ?: (snapshot.get("referrals") as? List<*>)?.size
+            ?: 0
+        referralCount.value = cloudRefCount
+
+        val calculatedHashrate = computeEffectiveHashrate(cloudRefCount)
+        currentHashrateGh.value = calculatedHashrate
+        val dynamicTokensPerSecond = getTokensPerSecond(calculatedHashrate)
+
         if (wasMiningActive && sessionStart > 0L) {
             val effectiveEnd = Math.min(now, sessionEnd)
             if (effectiveEnd > lastSync) {
                 val elapsedSec = Math.max(0L, (effectiveEnd - lastSync) / 1000)
-                grid += elapsedSec * TOKENS_PER_SECOND
+                grid += elapsedSec * dynamicTokensPerSecond
             }
         }
         val isStillMining = (now < sessionEnd) && wasMiningActive
@@ -289,6 +322,8 @@ class MiningRepository(context: Context) {
                 "freeMiningSessionStart" to sessionStart,
                 "freeMiningSessionEnd" to sessionEnd,
                 "hardwareNodes" to updatedNodes,
+                "freeHashrateGh" to calculatedHashrate,
+                "referralCount" to cloudRefCount,
                 "lastSyncTimestamp" to now
             ),
             SetOptions.merge()
@@ -301,6 +336,7 @@ class MiningRepository(context: Context) {
         _freeMiningEndTime.value = sessionEnd
         _deployedRigs.value = updatedNodes
         _deployedNodesCount.value = updatedNodes.size
+        lastTickTimestamp = now
 
         _userState.value = _userState.value.copy(
             uid = cleanKey,
@@ -337,6 +373,10 @@ class MiningRepository(context: Context) {
             val sessionEnd = (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong() ?: _freeMiningEndTime.value
             val isFreeMining = sessionEnd > now
 
+            val cloudRefCount = (snapshot.get("referralCount") as? Number)?.toInt() ?: referralCount.value
+            referralCount.value = cloudRefCount
+            currentHashrateGh.value = computeEffectiveHashrate(cloudRefCount)
+
             val rawNodes = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>)
                 ?: (snapshot.get("activeMiningRigs") as? List<Map<String, Any>>)
                 ?: _deployedRigs.value
@@ -370,6 +410,7 @@ class MiningRepository(context: Context) {
         val now = System.currentTimeMillis()
         val end = now + 86400000L
 
+        lastTickTimestamp = now
         _isMiningActive.value = true
         _freeMiningEndTime.value = end
 
@@ -451,7 +492,7 @@ class MiningRepository(context: Context) {
 
         val newRig = UserRig(
             id = node.id,
-            catalogId = catalogItem.id,
+            catalogId = "rig-custom",
             name = node.name,
             priceUsdt = node.costUsdt,
             hashrateGh = node.hashrateGh,
@@ -497,7 +538,10 @@ class MiningRepository(context: Context) {
 
         val now = System.currentTimeMillis()
         val current = _userState.value
-        if (!current.isAuthenticated || current.secretKey.isBlank()) return
+        if (!current.isAuthenticated || current.secretKey.isBlank()) {
+            lastTickTimestamp = now
+            return
+        }
 
         val sessionEnd = current.freeMiningSessionEnd
         val sessionStart = current.freeMiningSessionStart
@@ -510,9 +554,22 @@ class MiningRepository(context: Context) {
             }
         }
 
+        val elapsedMillis = (now - lastTickTimestamp).coerceAtLeast(0L)
+        lastTickTimestamp = now
+
+        if (elapsedMillis <= 0L) return
+        val elapsedSec = elapsedMillis / 1000.0
+
         var newGridBalance = current.gridBalance
         if (isFreeActive) {
-            newGridBalance += TOKENS_PER_SECOND
+            val effectiveElapsedSec = if (now > sessionEnd) {
+                val overSec = (now - sessionEnd) / 1000.0
+                (elapsedSec - overSec).coerceAtLeast(0.0)
+            } else {
+                elapsedSec
+            }
+            val dynamicTokensPerSecond = getTokensPerSecond(currentHashrateGh.value)
+            newGridBalance += effectiveElapsedSec * dynamicTokensPerSecond
             _gridBalance.value = newGridBalance
         }
 
@@ -521,10 +578,11 @@ class MiningRepository(context: Context) {
             if (rig.status == RigStatus.ACTIVE) {
                 val dailyYield = (rig.priceUsdt * 0.15) / 30.0
                 val yieldPerSec = dailyYield / 86400.0
-                additionalUsdtYield += yieldPerSec
+                val rigYield = yieldPerSec * elapsedSec
+                additionalUsdtYield += rigYield
                 rig.copy(
-                    totalReceivedUsdt = rig.totalReceivedUsdt + yieldPerSec,
-                    thisMonthEarnedUsdt = rig.thisMonthEarnedUsdt + yieldPerSec,
+                    totalReceivedUsdt = rig.totalReceivedUsdt + rigYield,
+                    thisMonthEarnedUsdt = rig.thisMonthEarnedUsdt + rigYield,
                     lastYieldCalculatedTimestamp = now
                 )
             } else rig
@@ -547,6 +605,8 @@ class MiningRepository(context: Context) {
                     "minerBalanceUsdt" to newMinerBalance,
                     "usdtBalance" to newMinerBalance,
                     "gridBalance" to newGridBalance,
+                    "referralCount" to referralCount.value,
+                    "freeHashrateGh" to currentHashrateGh.value,
                     "lastSyncTimestamp" to now
                 ),
                 SetOptions.merge()
@@ -561,6 +621,7 @@ class MiningRepository(context: Context) {
         setActiveKey(cleanKey)
         securityPreferences.setLoggedIn(true)
         isCloudHydrated = false
+        lastTickTimestamp = System.currentTimeMillis()
 
         val instantState = UserMiningState(
             uid = cleanKey,
@@ -589,6 +650,8 @@ class MiningRepository(context: Context) {
                     "minerBalanceUsdt" to current.minerBalanceUsdt,
                     "usdtBalance" to current.minerBalanceUsdt,
                     "gridBalance" to current.gridBalance,
+                    "referralCount" to referralCount.value,
+                    "freeHashrateGh" to currentHashrateGh.value,
                     "lastSyncTimestamp" to System.currentTimeMillis()
                 ),
                 SetOptions.merge()
@@ -701,6 +764,8 @@ class MiningRepository(context: Context) {
                         "hardwareNodes" to emptyList<Map<String, Any>>(),
                         "transactions" to emptyList<Map<String, Any>>(),
                         "securityPin" to "",
+                        "referralCount" to 0,
+                        "freeHashrateGh" to BASE_HASHRATE_GH,
                         "lastDailySpinTimestamp" to 0L,
                         "dailySpentUsdt" to 0.0,
                         "dailySpentResetDate" to now,
@@ -737,6 +802,8 @@ class MiningRepository(context: Context) {
                             _deployedNodesCount.value = 0
                             _isMiningActive.value = false
                             _freeMiningEndTime.value = 0L
+                            referralCount.value = 0
+                            currentHashrateGh.value = BASE_HASHRATE_GH
                             _userState.value = newState
 
                             bindUserSession(newSecretKey)
@@ -760,7 +827,7 @@ class MiningRepository(context: Context) {
     }
 
     // ========================================================
-    // WITHDRAWAL & DEPOSIT ENGINE: CLEAN COMPILATION & LIVE SYNC
+    // WITHDRAWAL & DEPOSIT ENGINE: LIVE FIRESTORE ACCRUAL
     // ========================================================
     fun requestWithdrawal(amountUsdt: Double, address: String, network: String): Result<TransactionItem> {
         val current = _userState.value
@@ -907,7 +974,6 @@ class MiningRepository(context: Context) {
 
     fun startFreeMiningCore(secretKey: String) { startFreeMiningSession() }
 
-    // Direct hardware deployment: bypasses RigCatalogItem dummy constructor
     fun deployHardwareRig(secretKey: String, rig: HardwareNode, onSuccess: () -> Unit = {}) {
         val current = _userState.value
         val now = System.currentTimeMillis()
@@ -961,6 +1027,24 @@ class MiningRepository(context: Context) {
         onSuccess()
     }
 
+    // Add referral and increase speed dynamically in cloud
+    fun simulateNewReferral() {
+        val currentKey = _userState.value.secretKey.ifBlank { getActiveKey() ?: return }
+        val newCount = referralCount.value + 1
+        referralCount.value = newCount
+        val newHashrate = computeEffectiveHashrate(newCount)
+        currentHashrateGh.value = newHashrate
+
+        firestore.collection("users").document(currentKey).set(
+            mapOf(
+                "referralCount" to newCount,
+                "freeHashrateGh" to newHashrate,
+                "lastSyncTimestamp" to System.currentTimeMillis()
+            ),
+            SetOptions.merge()
+        )
+    }
+
     fun restoreAccount(key: String, onComplete: (Boolean) -> Unit) { loginWithKeyInstant(key); onComplete(true) }
     fun initializeOrRestoreUser(key: String, onComplete: (Boolean) -> Unit) { loginWithKeyInstant(key); onComplete(true) }
     suspend fun restoreAccountWithSecretKey(secretKey: String): Result<UserMiningState> = Result.success(loginWithKeyInstant(secretKey))
@@ -979,7 +1063,6 @@ class MiningRepository(context: Context) {
     fun submitMicroTask(platform: TaskPlatform, initialViews: Int, finalViews: Int, notes: String) {}
     fun submitVideoPromo(platform: TaskPlatform, url: String, channel: String) {}
     fun simulateDownlinePurchase() {}
-    fun simulateNewReferral() {}
     fun approvePendingTasksSimulation() {}
     fun adminApproveWithdrawal(txId: String) {}
     fun adminRejectWithdrawal(txId: String) {}
