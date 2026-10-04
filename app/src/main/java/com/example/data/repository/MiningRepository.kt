@@ -230,7 +230,7 @@ class MiningRepository(context: Context) {
                         "referralCode" to refCode,
                         "referralCount" to referralCount.value,
                         "totalTeam" to referralCount.value,
-                        "teamCount" to referralCount.value,
+                        "teamCount" to referralCount.value.toLong(),
                         "freeHashrateGh" to currentHashrateGh.value,
                         "lastDailySpinTimestamp" to 0L,
                         "dailySpentUsdt" to 0.0,
@@ -342,7 +342,7 @@ class MiningRepository(context: Context) {
                 "referralCode" to resolvedCode,
                 "referralCount" to cloudRefCount,
                 "totalTeam" to cloudRefCount,
-                "teamCount" to cloudRefCount,
+                "teamCount" to cloudRefCount.toLong(),
                 "referralBoostHashrateGh" to boostGh,
                 "lastSyncTimestamp" to now
             ),
@@ -364,8 +364,7 @@ class MiningRepository(context: Context) {
             uid = cleanKey,
             secretKey = cleanKey,
             referralCode = resolvedCode,
-            teamCount = cloudRefCount,
-            referralBoostHashrateGh = boostGh,
+            teamCount = cloudRefCount.toLong(),
             minerBalanceUsdt = usdt,
             gridBalance = grid,
             isFreeMiningActive = isStillMining,
@@ -411,7 +410,6 @@ class MiningRepository(context: Context) {
             referralCount.value = cloudRefCount
             val effectiveHash = computeEffectiveHashrate(cloudRefCount)
             currentHashrateGh.value = effectiveHash
-            val boostGh = (cloudRefCount * HASH_BOOST_PER_REFERRAL).coerceAtLeast(0.0)
 
             val resolvedCode = resolveUserReferralCode(cleanKey, isMaster, snapshot.getString("referralCode"))
 
@@ -428,8 +426,7 @@ class MiningRepository(context: Context) {
 
             _userState.value = _userState.value.copy(
                 referralCode = resolvedCode,
-                teamCount = cloudRefCount,
-                referralBoostHashrateGh = boostGh,
+                teamCount = cloudRefCount.toLong(),
                 minerBalanceUsdt = usdt,
                 gridBalance = _gridBalance.value,
                 isFreeMiningActive = isFreeMining,
@@ -652,7 +649,7 @@ class MiningRepository(context: Context) {
                     "gridBalance" to newGridBalance,
                     "referralCount" to referralCount.value,
                     "totalTeam" to referralCount.value,
-                    "teamCount" to referralCount.value,
+                    "teamCount" to referralCount.value.toLong(),
                     "freeHashrateGh" to currentHashrateGh.value,
                     "lastSyncTimestamp" to now
                 ),
@@ -691,8 +688,7 @@ class MiningRepository(context: Context) {
             uid = cleanKey,
             secretKey = cleanKey,
             referralCode = refCode,
-            teamCount = savedRefCount,
-            referralBoostHashrateGh = savedRefCount * HASH_BOOST_PER_REFERRAL,
+            teamCount = savedRefCount.toLong(),
             email = if (isAdminKey) "admin@hashgrid.pro" else "miner_${cleanKey.takeLast(4).lowercase()}@hashgrid.pro",
             nodeId = if (isAdminKey) "NODE-SUPERADMIN-#0001" else "NODE-WEB3-#${cleanKey.takeLast(4)}",
             minerBalanceUsdt = _minerBalance.value,
@@ -723,7 +719,7 @@ class MiningRepository(context: Context) {
                     "gridBalance" to current.gridBalance,
                     "referralCount" to referralCount.value,
                     "totalTeam" to referralCount.value,
-                    "teamCount" to referralCount.value,
+                    "teamCount" to referralCount.value.toLong(),
                     "freeHashrateGh" to currentHashrateGh.value,
                     "lastSyncTimestamp" to System.currentTimeMillis()
                 ),
@@ -779,8 +775,7 @@ class MiningRepository(context: Context) {
             uid = key,
             secretKey = key,
             referralCode = refCode,
-            teamCount = savedRefCount,
-            referralBoostHashrateGh = savedRefCount * HASH_BOOST_PER_REFERRAL,
+            teamCount = savedRefCount.toLong(),
             email = if (isMasterAdmin) "admin@hashgrid.pro" else "miner_${key.takeLast(4).lowercase()}@hashgrid.pro",
             nodeId = if (isMasterAdmin) "NODE-SUPERADMIN-#0001" else "NODE-WEB3-#${key.takeLast(4)}",
             minerBalanceUsdt = savedUsdt,
@@ -908,7 +903,7 @@ class MiningRepository(context: Context) {
                         "securityPin" to "",
                         "referralCount" to 0,
                         "totalTeam" to 0,
-                        "teamCount" to 0,
+                        "teamCount" to 0L,
                         "referredBy" to (cleanReferral ?: ""),
                         "freeHashrateGh" to initialHashrate,
                         "referralBoostHashrateGh" to (if (cleanReferral != null) 0.25 else 0.0),
@@ -936,8 +931,7 @@ class MiningRepository(context: Context) {
                                 uid = newSecretKey,
                                 secretKey = newSecretKey,
                                 referralCode = myRefCode,
-                                teamCount = 0,
-                                referralBoostHashrateGh = (if (cleanReferral != null) 0.25 else 0.0),
+                                teamCount = 0L,
                                 email = "miner_${newSecretKey.takeLast(4).lowercase()}@hashgrid.pro",
                                 nodeId = "NODE-WEB3-#${newSecretKey.takeLast(4)}",
                                 minerBalanceUsdt = 0.0,
@@ -1150,8 +1144,7 @@ class MiningRepository(context: Context) {
         currentHashrateGh.value = newHashrate
 
         _userState.value = _userState.value.copy(
-            teamCount = newCount,
-            referralBoostHashrateGh = boostGh
+            teamCount = newCount.toLong()
         )
 
         saveLocalState(currentKey, _gridBalance.value, _minerBalance.value, _isMiningActive.value, _userState.value.freeMiningSessionStart, _freeMiningEndTime.value, newCount, newHashrate)
@@ -1160,7 +1153,7 @@ class MiningRepository(context: Context) {
             mapOf(
                 "referralCount" to newCount,
                 "totalTeam" to newCount,
-                "teamCount" to newCount,
+                "teamCount" to newCount.toLong(),
                 "freeHashrateGh" to newHashrate,
                 "referralBoostHashrateGh" to boostGh,
                 "lastSyncTimestamp" to System.currentTimeMillis()
