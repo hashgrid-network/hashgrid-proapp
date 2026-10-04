@@ -484,7 +484,7 @@ fun ProfileScreen(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Personal Link Preview Box
+                    // Personal Invite Link
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -724,7 +724,7 @@ fun ProfileScreen(
             }
         }
 
-        // 👑 Super Admin Control Hub (revealed when isAdmin == true)
+        // 👑 Super Admin Control Hub (when isAdmin == true)
         if (userState.isAdmin) {
             item {
                 GlowingBorderCard(
@@ -975,7 +975,7 @@ fun ProfileScreen(
             }
         }
 
-        // 🚀 App Version & Check for Updates Card (Links directly to hashgrid.online)
+        // 🚀 App Version & Check for Updates Card (Links to hashgrid.online)
         item {
             GlassCard(
                 modifier = Modifier
