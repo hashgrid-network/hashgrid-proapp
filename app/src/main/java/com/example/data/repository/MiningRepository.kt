@@ -20,7 +20,6 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
-import com.google.firebase.firestore.Source
 import java.util.UUID
 import kotlin.random.Random
 
@@ -37,7 +36,7 @@ class MiningRepository(context: Context) {
         const val BASE_DAILY_GRID = 4.0
         const val BASE_HASHRATE_GH = 2.0
         const val MAX_FREE_HASHRATE_GH = 10.0
-        const val HASH_BOOST_PER_REFERRAL = 0.50
+        const val HASH_BOOST_PER_REFERRAL = 0.25
         const val MAX_ACCOUNTS_PER_DEVICE = 2
     }
 
@@ -197,7 +196,6 @@ class MiningRepository(context: Context) {
         val docRef = firestore.collection("users").document(cleanKey)
         val isMaster = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
 
-        // Seamless Cache + Server sync (Never wipe on network latency)
         docRef.get().addOnCompleteListener { task ->
             val now = System.currentTimeMillis()
             if (task.isSuccessful) {
@@ -205,7 +203,6 @@ class MiningRepository(context: Context) {
                 if (snapshot != null && snapshot.exists()) {
                     restoreFromCloudWithAccrual(cleanKey, snapshot, isMaster, now)
                 } else {
-                    // Only create initial doc if truly missing from Firestore
                     val defaultUsdt = if (isMaster) 3000.0 else 0.0
                     val initData = hashMapOf(
                         "secretKey" to cleanKey,
@@ -221,6 +218,7 @@ class MiningRepository(context: Context) {
                         "transactions" to emptyList<Map<String, Any>>(),
                         "securityPin" to "",
                         "referralCount" to referralCount.value,
+                        "totalTeam" to referralCount.value,
                         "freeHashrateGh" to currentHashrateGh.value,
                         "lastDailySpinTimestamp" to 0L,
                         "dailySpentUsdt" to 0.0,
@@ -232,7 +230,7 @@ class MiningRepository(context: Context) {
                     isCloudSynced.value = true
                 }
             } else {
-                Log.w("MiningRepo", "Offline mode active, continuing with local persistent storage: ${task.exception?.message}")
+                Log.w("MiningRepo", "Offline mode active: ${task.exception?.message}")
                 isCloudHydrated = true
                 isCloudSynced.value = false
             }
@@ -257,13 +255,11 @@ class MiningRepository(context: Context) {
 
         val cloudSessionEnd = (snapshot.get("freeMiningSessionEnd") as? Number)?.toLong()
             ?: (snapshot.get("freeMiningEndTime") as? Number)?.toLong()
-            ?: (snapshot.get("miningEndTime") as? Number)?.toLong()
             ?: 0L
         val sessionEnd = Math.max(cloudSessionEnd, _freeMiningEndTime.value)
 
         val cloudSessionStart = (snapshot.get("freeMiningSessionStart") as? Number)?.toLong()
             ?: (snapshot.get("freeMiningStartTime") as? Number)?.toLong()
-            ?: (snapshot.get("miningStartTime") as? Number)?.toLong()
             ?: 0L
         val sessionStart = Math.max(cloudSessionStart, _userState.value.freeMiningSessionStart)
 
@@ -271,6 +267,7 @@ class MiningRepository(context: Context) {
         val wasMiningActive = snapshot.getBoolean("isFreeMiningActive") ?: snapshot.getBoolean("isMiningActive") ?: _isMiningActive.value
 
         val cloudRefCount = (snapshot.get("referralCount") as? Number)?.toInt()
+            ?: (snapshot.get("totalTeam") as? Number)?.toInt()
             ?: (snapshot.get("referrals") as? List<*>)?.size
             ?: referralCount.value
         referralCount.value = cloudRefCount
@@ -289,7 +286,6 @@ class MiningRepository(context: Context) {
         val isStillMining = (now < sessionEnd) && wasMiningActive
 
         val rawNodes = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>)
-            ?: (snapshot.get("activeMiningRigs") as? List<Map<String, Any>>)
             ?: emptyList()
 
         var totalAccruedYield = 0.0
@@ -297,8 +293,8 @@ class MiningRepository(context: Context) {
             val cost = (rigMap["costUsdt"] as? Number)?.toDouble() ?: (rigMap["priceUsdt"] as? Number)?.toDouble() ?: 1000.0
             val dailyYield = (cost * 0.15) / 30.0
             val yieldPerSec = dailyYield / 86400.0
-            val deployedAt = (rigMap["purchaseTimestamp"] as? Number)?.toLong() ?: (rigMap["deployedTimestamp"] as? Number)?.toLong() ?: now
-            val totalDays = (rigMap["totalDays"] as? Number)?.toInt() ?: (rigMap["durationDays"] as? Number)?.toInt() ?: 200
+            val deployedAt = (rigMap["purchaseTimestamp"] as? Number)?.toLong() ?: now
+            val totalDays = (rigMap["totalDays"] as? Number)?.toInt() ?: 200
             val expiry = deployedAt + (totalDays.toLong() * 86400000L)
 
             if (lastSync < expiry) {
@@ -318,7 +314,6 @@ class MiningRepository(context: Context) {
             securityPreferences.setPin(cloudPin)
         }
 
-        // Push fresh catch-up back to Firestore
         firestore.collection("users").document(cleanKey).set(
             mapOf(
                 "minerBalanceUsdt" to usdt,
@@ -331,6 +326,7 @@ class MiningRepository(context: Context) {
                 "hardwareNodes" to updatedNodes,
                 "freeHashrateGh" to calculatedHashrate,
                 "referralCount" to cloudRefCount,
+                "totalTeam" to cloudRefCount,
                 "lastSyncTimestamp" to now
             ),
             SetOptions.merge()
@@ -387,14 +383,13 @@ class MiningRepository(context: Context) {
                 _gridBalance.value = cloudGrid
             }
 
-            val cloudRefCount = (snapshot.get("referralCount") as? Number)?.toInt() ?: referralCount.value
+            val cloudRefCount = (snapshot.get("referralCount") as? Number)?.toInt()
+                ?: (snapshot.get("totalTeam") as? Number)?.toInt()
+                ?: referralCount.value
             referralCount.value = cloudRefCount
             currentHashrateGh.value = computeEffectiveHashrate(cloudRefCount)
 
-            val rawNodes = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>)
-                ?: (snapshot.get("activeMiningRigs") as? List<Map<String, Any>>)
-                ?: _deployedRigs.value
-
+            val rawNodes = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>) ?: _deployedRigs.value
             val userRigsList = rawNodes.mapNotNull { parseRigMap(it, now) }
             val rawTxs = snapshot.get("transactions") as? List<Map<String, Any>> ?: emptyList()
             val restoredTxs = if (rawTxs.isNotEmpty()) rawTxs.mapNotNull { parseTransactionMap(it, now) } else _userState.value.transactions
@@ -617,10 +612,8 @@ class MiningRepository(context: Context) {
             userRigs = updatedRigs
         )
 
-        // Save locally continuously so process kill never loses a single satoshi
         saveLocalState(current.secretKey, newGridBalance, newMinerBalance, isFreeActive, sessionStart, sessionEnd, referralCount.value, currentHashrateGh.value)
 
-        // Periodic cloud update every 25 seconds
         if (now - lastCloudSyncTime > 25000) {
             lastCloudSyncTime = now
             firestore.collection("users").document(current.secretKey).set(
@@ -629,6 +622,7 @@ class MiningRepository(context: Context) {
                     "usdtBalance" to newMinerBalance,
                     "gridBalance" to newGridBalance,
                     "referralCount" to referralCount.value,
+                    "totalTeam" to referralCount.value,
                     "freeHashrateGh" to currentHashrateGh.value,
                     "lastSyncTimestamp" to now
                 ),
@@ -645,7 +639,6 @@ class MiningRepository(context: Context) {
         securityPreferences.setLoggedIn(true)
         lastTickTimestamp = System.currentTimeMillis()
 
-        // Load instantly from local storage before network response
         val vault = getUserVault(cleanKey)
         val savedGrid = vault.getFloat("saved_grid_balance", 0.0f).toDouble()
         val defaultUsdt = if (isAdminKey) 3000.0 else 0.0
@@ -692,6 +685,7 @@ class MiningRepository(context: Context) {
                     "usdtBalance" to current.minerBalanceUsdt,
                     "gridBalance" to current.gridBalance,
                     "referralCount" to referralCount.value,
+                    "totalTeam" to referralCount.value,
                     "freeHashrateGh" to currentHashrateGh.value,
                     "lastSyncTimestamp" to System.currentTimeMillis()
                 ),
@@ -757,7 +751,51 @@ class MiningRepository(context: Context) {
         )
     }
 
-    suspend fun createNewAccount(): Result<UserMiningState> = suspendCancellableCoroutine { continuation ->
+    // ==========================================
+    // REVOLUTIONARY REFERRAL CREDITING ENGINE
+    // ==========================================
+    private fun creditSponsorOnCloud(sponsorCode: String, newUserId: String) {
+        val clean = sponsorCode.trim().uppercase()
+        val targetDocId = if (clean == "HG-7788") "HG-ADM9-7788-5544-0001" else clean
+
+        val directRef = firestore.collection("users").document(targetDocId)
+        directRef.get().addOnSuccessListener { snap ->
+            if (snap != null && snap.exists()) {
+                applySponsorCredit(directRef, snap, newUserId)
+            } else {
+                firestore.collection("users").get().addOnSuccessListener { querySnap ->
+                    for (doc in querySnap.documents) {
+                        val key = doc.id
+                        val codeMatch = clean.replace("HG-", "")
+                        if (key.contains(codeMatch) || doc.getString("nodeId")?.contains(codeMatch) == true) {
+                            applySponsorCredit(doc.reference, doc, newUserId)
+                            break
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun applySponsorCredit(docRef: com.google.firebase.firestore.DocumentReference, snap: com.google.firebase.firestore.DocumentSnapshot, newUserId: String) {
+        val currentRefs = (snap.get("referralCount") as? Number)?.toInt()
+            ?: (snap.get("totalTeam") as? Number)?.toInt()
+            ?: 0
+        val updatedRefs = currentRefs + 1
+        val updatedHashrate = computeEffectiveHashrate(updatedRefs)
+
+        docRef.update(
+            mapOf(
+                "referralCount" to FieldValue.increment(1),
+                "totalTeam" to FieldValue.increment(1),
+                "freeHashrateGh" to updatedHashrate,
+                "referrals" to FieldValue.arrayUnion(newUserId),
+                "lastSyncTimestamp" to System.currentTimeMillis()
+            )
+        )
+    }
+
+    suspend fun createNewAccount(referralCode: String? = null): Result<UserMiningState> = suspendCancellableCoroutine { continuation ->
         try {
             val androidId = Settings.Secure.getString(
                 appContext.contentResolver,
@@ -800,6 +838,8 @@ class MiningRepository(context: Context) {
                     val newSecretKey = "HG-$part1-$part2-$part3"
 
                     val now = System.currentTimeMillis()
+                    val cleanReferral = referralCode?.trim()?.uppercase()?.ifBlank { null }
+                    val initialHashrate = if (cleanReferral != null) (BASE_HASHRATE_GH + 0.25) else BASE_HASHRATE_GH
 
                     val initialUserData = hashMapOf(
                         "secretKey" to newSecretKey,
@@ -817,7 +857,9 @@ class MiningRepository(context: Context) {
                         "transactions" to emptyList<Map<String, Any>>(),
                         "securityPin" to "",
                         "referralCount" to 0,
-                        "freeHashrateGh" to BASE_HASHRATE_GH,
+                        "totalTeam" to 0,
+                        "referredBy" to (cleanReferral ?: ""),
+                        "freeHashrateGh" to initialHashrate,
                         "lastDailySpinTimestamp" to 0L,
                         "dailySpentUsdt" to 0.0,
                         "dailySpentResetDate" to now,
@@ -829,6 +871,11 @@ class MiningRepository(context: Context) {
                         .set(initialUserData, SetOptions.merge())
                         .addOnSuccessListener {
                             globalPrefs.edit().putInt(deviceAccountsKey, totalDeviceAccounts + 1).apply()
+
+                            // Auto-credit sponsor
+                            if (cleanReferral != null) {
+                                creditSponsorOnCloud(cleanReferral, newSecretKey)
+                            }
 
                             setActiveKey(newSecretKey)
                             securityPreferences.setLoggedIn(true)
@@ -855,7 +902,7 @@ class MiningRepository(context: Context) {
                             _isMiningActive.value = false
                             _freeMiningEndTime.value = 0L
                             referralCount.value = 0
-                            currentHashrateGh.value = BASE_HASHRATE_GH
+                            currentHashrateGh.value = initialHashrate
                             _userState.value = newState
 
                             bindUserSession(newSecretKey)
@@ -882,15 +929,9 @@ class MiningRepository(context: Context) {
         val current = _userState.value
         val cleanKey = SecretKeyUtils.normalizeSecretKey(current.secretKey.ifBlank { getActiveKey() ?: return Result.failure(Exception("User not authenticated")) })
 
-        if (amountUsdt <= 0) {
-            return Result.failure(Exception("Invalid withdrawal amount"))
-        }
-        if (current.minerBalanceUsdt < amountUsdt) {
-            return Result.failure(Exception("Insufficient withdrawable balance. Available: $${String.format("%.2f", current.minerBalanceUsdt)}"))
-        }
-        if (address.isBlank()) {
-            return Result.failure(Exception("Please enter a valid destination address"))
-        }
+        if (amountUsdt <= 0) return Result.failure(Exception("Invalid withdrawal amount"))
+        if (current.minerBalanceUsdt < amountUsdt) return Result.failure(Exception("Insufficient balance"))
+        if (address.isBlank()) return Result.failure(Exception("Please enter a destination address"))
 
         val now = System.currentTimeMillis()
         val newBalance = (current.minerBalanceUsdt - amountUsdt).coerceAtLeast(0.0)
@@ -916,11 +957,7 @@ class MiningRepository(context: Context) {
         saveLocalState(cleanKey, _gridBalance.value, newBalance, _isMiningActive.value, current.freeMiningSessionStart, _freeMiningEndTime.value, referralCount.value, currentHashrateGh.value)
 
         firestore.collection("users").document(cleanKey).set(
-            mapOf(
-                "minerBalanceUsdt" to newBalance,
-                "usdtBalance" to newBalance,
-                "lastSyncTimestamp" to now
-            ),
+            mapOf("minerBalanceUsdt" to newBalance, "usdtBalance" to newBalance, "lastSyncTimestamp" to now),
             SetOptions.merge()
         )
         recordCloudTransaction(cleanKey, tx)
@@ -970,11 +1007,7 @@ class MiningRepository(context: Context) {
         saveLocalState(cleanKey, _gridBalance.value, newBalance, _isMiningActive.value, current.freeMiningSessionStart, _freeMiningEndTime.value, referralCount.value, currentHashrateGh.value)
 
         firestore.collection("users").document(cleanKey).set(
-            mapOf(
-                "minerBalanceUsdt" to newBalance,
-                "usdtBalance" to newBalance,
-                "lastSyncTimestamp" to now
-            ),
+            mapOf("minerBalanceUsdt" to newBalance, "usdtBalance" to newBalance, "lastSyncTimestamp" to now),
             SetOptions.merge()
         )
         recordCloudTransaction(cleanKey, tx)
@@ -990,19 +1023,12 @@ class MiningRepository(context: Context) {
         val updatedGrid = current.gridBalance + rewardGrid
 
         _gridBalance.value = updatedGrid
-        _userState.value = current.copy(
-            gridBalance = updatedGrid,
-            lastDailySpinTimestamp = now
-        )
+        _userState.value = current.copy(gridBalance = updatedGrid, lastDailySpinTimestamp = now)
 
         saveLocalState(cleanKey, updatedGrid, current.minerBalanceUsdt, _isMiningActive.value, current.freeMiningSessionStart, _freeMiningEndTime.value, referralCount.value, currentHashrateGh.value)
 
         firestore.collection("users").document(cleanKey).set(
-            mapOf(
-                "gridBalance" to updatedGrid,
-                "lastDailySpinTimestamp" to now,
-                "lastSyncTimestamp" to now
-            ),
+            mapOf("gridBalance" to updatedGrid, "lastDailySpinTimestamp" to now, "lastSyncTimestamp" to now),
             SetOptions.merge()
         )
     }
@@ -1015,12 +1041,7 @@ class MiningRepository(context: Context) {
 
     fun executeLuckySpin(sector: SpinSector): SpinHistoryRecord {
         return SpinHistoryRecord(
-            UUID.randomUUID().toString().take(8),
-            "Daily Spin",
-            "Grid Reward",
-            System.currentTimeMillis(),
-            SpinRewardType.GRID_TOKENS,
-            0.0
+            UUID.randomUUID().toString().take(8), "Daily Spin", "Grid Reward", System.currentTimeMillis(), SpinRewardType.GRID_TOKENS, 0.0
         )
     }
 
@@ -1050,29 +1071,16 @@ class MiningRepository(context: Context) {
         _deployedNodesCount.value = updatedRigsRaw.size
 
         val newRig = UserRig(
-            id = rig.id,
-            catalogId = "rig-custom",
-            name = rig.name,
-            priceUsdt = rig.costUsdt,
-            hashrateGh = rig.hashrateGh,
-            purchaseTimestamp = now,
-            durationDays = rig.totalDays,
-            status = RigStatus.ACTIVE,
-            totalReceivedUsdt = 0.0,
-            thisMonthEarnedUsdt = 0.0,
-            lastYieldCalculatedTimestamp = now
+            id = rig.id, catalogId = "rig-custom", name = rig.name, priceUsdt = rig.costUsdt,
+            hashrateGh = rig.hashrateGh, purchaseTimestamp = now, durationDays = rig.totalDays,
+            status = RigStatus.ACTIVE, totalReceivedUsdt = 0.0, thisMonthEarnedUsdt = 0.0, lastYieldCalculatedTimestamp = now
         )
 
-        _userState.value = current.copy(
-            userRigs = listOf(newRig) + current.userRigs
-        )
+        _userState.value = current.copy(userRigs = listOf(newRig) + current.userRigs)
 
         if (cleanKey.isNotBlank()) {
             firestore.collection("users").document(cleanKey).set(
-                mapOf(
-                    "hardwareNodes" to FieldValue.arrayUnion(rigMap),
-                    "lastSyncTimestamp" to now
-                ),
+                mapOf("hardwareNodes" to FieldValue.arrayUnion(rigMap), "lastSyncTimestamp" to now),
                 SetOptions.merge()
             )
         }
@@ -1089,11 +1097,7 @@ class MiningRepository(context: Context) {
         saveLocalState(currentKey, _gridBalance.value, _minerBalance.value, _isMiningActive.value, _userState.value.freeMiningSessionStart, _freeMiningEndTime.value, newCount, newHashrate)
 
         firestore.collection("users").document(currentKey).set(
-            mapOf(
-                "referralCount" to newCount,
-                "freeHashrateGh" to newHashrate,
-                "lastSyncTimestamp" to System.currentTimeMillis()
-            ),
+            mapOf("referralCount" to newCount, "totalTeam" to newCount, "freeHashrateGh" to newHashrate, "lastSyncTimestamp" to System.currentTimeMillis()),
             SetOptions.merge()
         )
     }
