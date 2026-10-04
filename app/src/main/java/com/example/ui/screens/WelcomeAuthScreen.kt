@@ -33,6 +33,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.security.SecretKeyUtils
 import com.example.ui.components.GlassCard
 import com.example.ui.components.GlowingBorderCard
@@ -41,7 +43,7 @@ import com.example.ui.theme.*
 @Composable
 fun WelcomeAuthScreen(
     isLoading: Boolean,
-    onCreateAccount: () -> Unit,
+    onCreateAccount: (referralCode: String?) -> Unit,
     onRestoreAccount: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -51,9 +53,168 @@ fun WelcomeAuthScreen(
     var inputKey by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    // State for Referral Input Dialog
+    var showReferralDialog by remember { mutableStateOf(false) }
+    var referralInput by remember { mutableStateOf("") }
+
+    // Helper to extract clean referral code from string or link
+    fun extractReferral(raw: String): String {
+        val trimmed = raw.trim()
+        return if (trimmed.contains("ref=")) {
+            trimmed.substringAfter("ref=").substringBefore("&").trim()
+        } else if (trimmed.contains("referral=")) {
+            trimmed.substringAfter("referral=").substringBefore("&").trim()
+        } else {
+            trimmed
+        }
+    }
+
     BackHandler(enabled = isLoginMode) {
         isLoginMode = false
         errorMessage = null
+    }
+
+    // ==========================================
+    // SPONSOR / REFERRAL INPUT DIALOG
+    // ==========================================
+    if (showReferralDialog) {
+        Dialog(
+            onDismissRequest = { showReferralDialog = false },
+            properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false)
+        ) {
+            GlowingBorderCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                glowColor = GoldPrimary
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(DarkNavySurface)
+                        .padding(20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(50.dp)
+                            .clip(CircleShape)
+                            .background(GoldPrimary.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.CardGiftcard,
+                            contentDescription = null,
+                            tint = GoldPrimary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "SPONSOR REFERRAL CODE",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.ExtraBold,
+                            color = TextGold,
+                            letterSpacing = 1.sp
+                        )
+                    )
+
+                    Text(
+                        text = "Enter your sponsor's referral ID (e.g. HG-7788) to join their node team and unlock +0.25 GH/s free hash bonus.",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center,
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp
+                        )
+                    )
+
+                    OutlinedTextField(
+                        value = referralInput,
+                        onValueChange = { raw ->
+                            referralInput = extractReferral(raw).uppercase()
+                        },
+                        label = { Text("Referral / Sponsor Code", fontSize = 11.sp) },
+                        placeholder = { Text("HG-7788", color = TextMuted) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Characters,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                        leadingIcon = {
+                            Icon(Icons.Default.PersonAdd, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(18.dp))
+                        },
+                        trailingIcon = {
+                            IconButton(
+                                onClick = {
+                                    try {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                        val clip = clipboard?.primaryClip
+                                        if (clip != null && clip.itemCount > 0) {
+                                            val text = clip.getItemAt(0)?.text?.toString() ?: ""
+                                            val parsed = extractReferral(text)
+                                            if (parsed.isNotBlank()) {
+                                                referralInput = parsed.uppercase()
+                                            }
+                                        }
+                                    } catch (_: Throwable) {}
+                                }
+                            ) {
+                                Icon(Icons.Default.ContentPaste, contentDescription = "Paste", tint = CyanAccent)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GoldPrimary,
+                            unfocusedBorderColor = Color(0xFF334155),
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Action Buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Skip Button (Creates without code)
+                        OutlinedButton(
+                            onClick = {
+                                showReferralDialog = false
+                                onCreateAccount(null)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
+                        ) {
+                            Text("SKIP", color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+
+                        // Apply & Join Team Button
+                        Button(
+                            onClick = {
+                                val code = referralInput.trim().ifBlank { null }
+                                showReferralDialog = false
+                                onCreateAccount(code)
+                            },
+                            modifier = Modifier
+                                .weight(1.4f)
+                                .height(46.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("APPLY & JOIN", color = ObsidianBg, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Box(
@@ -91,7 +252,7 @@ fun WelcomeAuthScreen(
             Icon(
                 painter = androidx.compose.ui.res.painterResource(id = com.example.R.drawable.ic_sacred_triangle),
                 contentDescription = "The Quantum Apex Matrix Logo",
-                tint = Color.Unspecified, // Keeps gold/cyan/emerald custom colors
+                tint = Color.Unspecified,
                 modifier = Modifier
                     .size(96.dp)
                     .testTag("welcome_sacred_triangle_logo")
@@ -179,9 +340,23 @@ fun WelcomeAuthScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // Button 1: Create New Account
+                        // Button 1: Create New Account (Now triggers Referral Dialog)
                         Button(
-                            onClick = onCreateAccount,
+                            onClick = {
+                                // Auto-check clipboard before opening dialog
+                                try {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    val clip = clipboard?.primaryClip
+                                    if (clip != null && clip.itemCount > 0) {
+                                        val text = clip.getItemAt(0)?.text?.toString() ?: ""
+                                        val parsed = extractReferral(text)
+                                        if (parsed.isNotBlank() && (parsed.startsWith("HG-") || parsed.length in 4..12)) {
+                                            referralInput = parsed.uppercase()
+                                        }
+                                    }
+                                } catch (_: Throwable) {}
+                                showReferralDialog = true
+                            },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(52.dp)
@@ -303,7 +478,6 @@ fun WelcomeAuthScreen(
                                 style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary, fontSize = 11.sp)
                             )
 
-                            // Secret Key Input with Auto-Formatting and Paste
                             OutlinedTextField(
                                 value = inputKey,
                                 onValueChange = { raw ->
@@ -362,7 +536,6 @@ fun WelcomeAuthScreen(
                                 )
                             }
 
-                            // Submit Button
                             Button(
                                 onClick = {
                                     focusManager.clearFocus()
