@@ -114,6 +114,15 @@ class MiningRepository(context: Context) {
         currentHashrateGh.value = BASE_HASHRATE_GH
     }
 
+    private fun resolveUserReferralCode(cleanKey: String, isMaster: Boolean, snapshotCode: String?): String {
+        if (!snapshotCode.isNullOrBlank()) return snapshotCode
+        if (isMaster || cleanKey.contains("ADM9") || cleanKey.contains("7788")) {
+            return "HG-7788"
+        }
+        val cleanDigits = cleanKey.replace("HG-", "").replace("-", "")
+        return if (cleanDigits.length >= 4) "HG-${cleanDigits.take(4)}" else cleanKey
+    }
+
     private fun computeEffectiveHashrate(refCount: Int): Double {
         val boost = refCount * HASH_BOOST_PER_REFERRAL
         return (BASE_HASHRATE_GH + boost).coerceIn(BASE_HASHRATE_GH, MAX_FREE_HASHRATE_GH)
@@ -195,6 +204,7 @@ class MiningRepository(context: Context) {
         snapshotRegistration?.remove()
         val docRef = firestore.collection("users").document(cleanKey)
         val isMaster = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
+        val refCode = resolveUserReferralCode(cleanKey, isMaster, null)
 
         docRef.get().addOnCompleteListener { task ->
             val now = System.currentTimeMillis()
@@ -217,8 +227,10 @@ class MiningRepository(context: Context) {
                         "hardwareNodes" to emptyList<Map<String, Any>>(),
                         "transactions" to emptyList<Map<String, Any>>(),
                         "securityPin" to "",
+                        "referralCode" to refCode,
                         "referralCount" to referralCount.value,
                         "totalTeam" to referralCount.value,
+                        "teamCount" to referralCount.value,
                         "freeHashrateGh" to currentHashrateGh.value,
                         "lastDailySpinTimestamp" to 0L,
                         "dailySpentUsdt" to 0.0,
@@ -268,6 +280,7 @@ class MiningRepository(context: Context) {
 
         val cloudRefCount = (snapshot.get("referralCount") as? Number)?.toInt()
             ?: (snapshot.get("totalTeam") as? Number)?.toInt()
+            ?: (snapshot.get("teamCount") as? Number)?.toInt()
             ?: (snapshot.get("referrals") as? List<*>)?.size
             ?: referralCount.value
         referralCount.value = cloudRefCount
@@ -275,6 +288,9 @@ class MiningRepository(context: Context) {
         val calculatedHashrate = computeEffectiveHashrate(cloudRefCount)
         currentHashrateGh.value = calculatedHashrate
         val dynamicTokensPerSecond = getTokensPerSecond(calculatedHashrate)
+        val boostGh = (cloudRefCount * HASH_BOOST_PER_REFERRAL).coerceAtLeast(0.0)
+
+        val resolvedCode = resolveUserReferralCode(cleanKey, isMaster, snapshot.getString("referralCode"))
 
         if (wasMiningActive && sessionStart > 0L) {
             val effectiveEnd = Math.min(now, sessionEnd)
@@ -285,9 +301,7 @@ class MiningRepository(context: Context) {
         }
         val isStillMining = (now < sessionEnd) && wasMiningActive
 
-        val rawNodes = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>)
-            ?: emptyList()
-
+        val rawNodes = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>) ?: emptyList()
         var totalAccruedYield = 0.0
         val updatedNodes = rawNodes.map { rigMap ->
             val cost = (rigMap["costUsdt"] as? Number)?.toDouble() ?: (rigMap["priceUsdt"] as? Number)?.toDouble() ?: 1000.0
@@ -325,8 +339,11 @@ class MiningRepository(context: Context) {
                 "freeMiningSessionEnd" to sessionEnd,
                 "hardwareNodes" to updatedNodes,
                 "freeHashrateGh" to calculatedHashrate,
+                "referralCode" to resolvedCode,
                 "referralCount" to cloudRefCount,
                 "totalTeam" to cloudRefCount,
+                "teamCount" to cloudRefCount,
+                "referralBoostHashrateGh" to boostGh,
                 "lastSyncTimestamp" to now
             ),
             SetOptions.merge()
@@ -346,6 +363,9 @@ class MiningRepository(context: Context) {
         _userState.value = _userState.value.copy(
             uid = cleanKey,
             secretKey = cleanKey,
+            referralCode = resolvedCode,
+            teamCount = cloudRefCount,
+            referralBoostHashrateGh = boostGh,
             minerBalanceUsdt = usdt,
             gridBalance = grid,
             isFreeMiningActive = isStillMining,
@@ -385,9 +405,15 @@ class MiningRepository(context: Context) {
 
             val cloudRefCount = (snapshot.get("referralCount") as? Number)?.toInt()
                 ?: (snapshot.get("totalTeam") as? Number)?.toInt()
+                ?: (snapshot.get("teamCount") as? Number)?.toInt()
+                ?: (snapshot.get("referrals") as? List<*>)?.size
                 ?: referralCount.value
             referralCount.value = cloudRefCount
-            currentHashrateGh.value = computeEffectiveHashrate(cloudRefCount)
+            val effectiveHash = computeEffectiveHashrate(cloudRefCount)
+            currentHashrateGh.value = effectiveHash
+            val boostGh = (cloudRefCount * HASH_BOOST_PER_REFERRAL).coerceAtLeast(0.0)
+
+            val resolvedCode = resolveUserReferralCode(cleanKey, isMaster, snapshot.getString("referralCode"))
 
             val rawNodes = (snapshot.get("hardwareNodes") as? List<Map<String, Any>>) ?: _deployedRigs.value
             val userRigsList = rawNodes.mapNotNull { parseRigMap(it, now) }
@@ -401,6 +427,9 @@ class MiningRepository(context: Context) {
             _deployedNodesCount.value = rawNodes.size
 
             _userState.value = _userState.value.copy(
+                referralCode = resolvedCode,
+                teamCount = cloudRefCount,
+                referralBoostHashrateGh = boostGh,
                 minerBalanceUsdt = usdt,
                 gridBalance = _gridBalance.value,
                 isFreeMiningActive = isFreeMining,
@@ -623,6 +652,7 @@ class MiningRepository(context: Context) {
                     "gridBalance" to newGridBalance,
                     "referralCount" to referralCount.value,
                     "totalTeam" to referralCount.value,
+                    "teamCount" to referralCount.value,
                     "freeHashrateGh" to currentHashrateGh.value,
                     "lastSyncTimestamp" to now
                 ),
@@ -634,6 +664,7 @@ class MiningRepository(context: Context) {
     fun loginWithKeyInstant(key: String): UserMiningState {
         val cleanKey = SecretKeyUtils.normalizeSecretKey(key)
         val isAdminKey = cleanKey.startsWith("HG-ADM9") || SecretKeyUtils.isMasterAdminKey(cleanKey)
+        val refCode = resolveUserReferralCode(cleanKey, isAdminKey, null)
 
         setActiveKey(cleanKey)
         securityPreferences.setLoggedIn(true)
@@ -646,16 +677,22 @@ class MiningRepository(context: Context) {
         val savedEnd = vault.getLong("saved_session_end", 0L)
         val savedStart = vault.getLong("saved_session_start", 0L)
         val savedMining = vault.getBoolean("saved_mining_active", false)
+        val savedRefCount = vault.getInt("saved_ref_count", 0)
         val isStillActive = savedMining && (savedEnd > System.currentTimeMillis()) && (savedStart > 0L)
 
         _gridBalance.value = Math.max(savedGrid, _gridBalance.value)
         _minerBalance.value = Math.max(savedUsdt, _minerBalance.value)
         _freeMiningEndTime.value = savedEnd
         _isMiningActive.value = isStillActive
+        referralCount.value = savedRefCount
+        currentHashrateGh.value = computeEffectiveHashrate(savedRefCount)
 
         val instantState = UserMiningState(
             uid = cleanKey,
             secretKey = cleanKey,
+            referralCode = refCode,
+            teamCount = savedRefCount,
+            referralBoostHashrateGh = savedRefCount * HASH_BOOST_PER_REFERRAL,
             email = if (isAdminKey) "admin@hashgrid.pro" else "miner_${cleanKey.takeLast(4).lowercase()}@hashgrid.pro",
             nodeId = if (isAdminKey) "NODE-SUPERADMIN-#0001" else "NODE-WEB3-#${cleanKey.takeLast(4)}",
             minerBalanceUsdt = _minerBalance.value,
@@ -686,6 +723,7 @@ class MiningRepository(context: Context) {
                     "gridBalance" to current.gridBalance,
                     "referralCount" to referralCount.value,
                     "totalTeam" to referralCount.value,
+                    "teamCount" to referralCount.value,
                     "freeHashrateGh" to currentHashrateGh.value,
                     "lastSyncTimestamp" to System.currentTimeMillis()
                 ),
@@ -733,11 +771,16 @@ class MiningRepository(context: Context) {
         val savedEnd = vault?.getLong("saved_session_end", 0L) ?: 0L
         val savedStart = vault?.getLong("saved_session_start", 0L) ?: 0L
         val savedMining = vault?.getBoolean("saved_mining_active", false) ?: false
+        val savedRefCount = vault?.getInt("saved_ref_count", 0) ?: 0
         val isStillActive = savedMining && (savedEnd > System.currentTimeMillis()) && (savedStart > 0L)
+        val refCode = resolveUserReferralCode(key, isMasterAdmin, null)
 
         return UserMiningState(
             uid = key,
             secretKey = key,
+            referralCode = refCode,
+            teamCount = savedRefCount,
+            referralBoostHashrateGh = savedRefCount * HASH_BOOST_PER_REFERRAL,
             email = if (isMasterAdmin) "admin@hashgrid.pro" else "miner_${key.takeLast(4).lowercase()}@hashgrid.pro",
             nodeId = if (isMasterAdmin) "NODE-SUPERADMIN-#0001" else "NODE-WEB3-#${key.takeLast(4)}",
             minerBalanceUsdt = savedUsdt,
@@ -767,7 +810,8 @@ class MiningRepository(context: Context) {
                     for (doc in querySnap.documents) {
                         val key = doc.id
                         val codeMatch = clean.replace("HG-", "")
-                        if (key.contains(codeMatch) || doc.getString("nodeId")?.contains(codeMatch) == true) {
+                        val docRefCode = doc.getString("referralCode")?.uppercase() ?: ""
+                        if (docRefCode == clean || key.contains(codeMatch) || doc.getString("nodeId")?.contains(codeMatch) == true || (clean == "HG-7788" && doc.getBoolean("isAdmin") == true)) {
                             applySponsorCredit(doc.reference, doc, newUserId)
                             break
                         }
@@ -780,15 +824,19 @@ class MiningRepository(context: Context) {
     private fun applySponsorCredit(docRef: com.google.firebase.firestore.DocumentReference, snap: com.google.firebase.firestore.DocumentSnapshot, newUserId: String) {
         val currentRefs = (snap.get("referralCount") as? Number)?.toInt()
             ?: (snap.get("totalTeam") as? Number)?.toInt()
+            ?: (snap.get("teamCount") as? Number)?.toInt()
             ?: 0
         val updatedRefs = currentRefs + 1
         val updatedHashrate = computeEffectiveHashrate(updatedRefs)
+        val boostGh = updatedRefs * HASH_BOOST_PER_REFERRAL
 
         docRef.update(
             mapOf(
                 "referralCount" to FieldValue.increment(1),
                 "totalTeam" to FieldValue.increment(1),
+                "teamCount" to FieldValue.increment(1),
                 "freeHashrateGh" to updatedHashrate,
+                "referralBoostHashrateGh" to boostGh,
                 "referrals" to FieldValue.arrayUnion(newUserId),
                 "lastSyncTimestamp" to System.currentTimeMillis()
             )
@@ -840,10 +888,12 @@ class MiningRepository(context: Context) {
                     val now = System.currentTimeMillis()
                     val cleanReferral = referralCode?.trim()?.uppercase()?.ifBlank { null }
                     val initialHashrate = if (cleanReferral != null) (BASE_HASHRATE_GH + 0.25) else BASE_HASHRATE_GH
+                    val myRefCode = "HG-$part1"
 
                     val initialUserData = hashMapOf(
                         "secretKey" to newSecretKey,
                         "uid" to newSecretKey,
+                        "referralCode" to myRefCode,
                         "isAdmin" to false,
                         "deviceId" to androidId,
                         "minerBalanceUsdt" to 0.0,
@@ -858,8 +908,10 @@ class MiningRepository(context: Context) {
                         "securityPin" to "",
                         "referralCount" to 0,
                         "totalTeam" to 0,
+                        "teamCount" to 0,
                         "referredBy" to (cleanReferral ?: ""),
                         "freeHashrateGh" to initialHashrate,
+                        "referralBoostHashrateGh" to (if (cleanReferral != null) 0.25 else 0.0),
                         "lastDailySpinTimestamp" to 0L,
                         "dailySpentUsdt" to 0.0,
                         "dailySpentResetDate" to now,
@@ -872,7 +924,6 @@ class MiningRepository(context: Context) {
                         .addOnSuccessListener {
                             globalPrefs.edit().putInt(deviceAccountsKey, totalDeviceAccounts + 1).apply()
 
-                            // Auto-credit sponsor
                             if (cleanReferral != null) {
                                 creditSponsorOnCloud(cleanReferral, newSecretKey)
                             }
@@ -884,6 +935,9 @@ class MiningRepository(context: Context) {
                             val newState = UserMiningState(
                                 uid = newSecretKey,
                                 secretKey = newSecretKey,
+                                referralCode = myRefCode,
+                                teamCount = 0,
+                                referralBoostHashrateGh = (if (cleanReferral != null) 0.25 else 0.0),
                                 email = "miner_${newSecretKey.takeLast(4).lowercase()}@hashgrid.pro",
                                 nodeId = "NODE-WEB3-#${newSecretKey.takeLast(4)}",
                                 minerBalanceUsdt = 0.0,
@@ -1092,12 +1146,25 @@ class MiningRepository(context: Context) {
         val newCount = referralCount.value + 1
         referralCount.value = newCount
         val newHashrate = computeEffectiveHashrate(newCount)
+        val boostGh = newCount * HASH_BOOST_PER_REFERRAL
         currentHashrateGh.value = newHashrate
+
+        _userState.value = _userState.value.copy(
+            teamCount = newCount,
+            referralBoostHashrateGh = boostGh
+        )
 
         saveLocalState(currentKey, _gridBalance.value, _minerBalance.value, _isMiningActive.value, _userState.value.freeMiningSessionStart, _freeMiningEndTime.value, newCount, newHashrate)
 
         firestore.collection("users").document(currentKey).set(
-            mapOf("referralCount" to newCount, "totalTeam" to newCount, "freeHashrateGh" to newHashrate, "lastSyncTimestamp" to System.currentTimeMillis()),
+            mapOf(
+                "referralCount" to newCount,
+                "totalTeam" to newCount,
+                "teamCount" to newCount,
+                "freeHashrateGh" to newHashrate,
+                "referralBoostHashrateGh" to boostGh,
+                "lastSyncTimestamp" to System.currentTimeMillis()
+            ),
             SetOptions.merge()
         )
     }
