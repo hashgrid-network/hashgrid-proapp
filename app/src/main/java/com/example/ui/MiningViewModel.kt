@@ -373,9 +373,12 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
         emitToast("Secret Key backup confirmed! Keep your key safe.")
     }
 
-    fun createNewAccount() {
+    // ==========================================
+    // CREATE ACCOUNT WITH REFERRAL SUPPORT
+    // ==========================================
+    fun createNewAccount(referralCode: String? = null) {
         viewModelScope.launch {
-            val result = repository.createNewAccount()
+            val result = repository.createNewAccount(referralCode)
             if (result.isSuccess) {
                 val state = result.getOrNull()
                 val key = state?.secretKey ?: repository.getActiveKey()
@@ -430,7 +433,6 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
         repository.bindUserSession(key)
     }
 
-    // SAFE RESUME: Re-binds to Firestore without blindly overwriting with 0.0
     fun onAppResumed() {
         val key = userState.value.secretKey.ifBlank { repository.getActiveKey() ?: "" }
         if (key.isNotBlank()) {
@@ -438,7 +440,6 @@ class MiningViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // SAFE PAUSE: Safely persists current active state to cloud
     fun onAppPaused() {
         val key = userState.value.secretKey.ifBlank { repository.getActiveKey() ?: "" }
         if (key.isNotBlank()) {
