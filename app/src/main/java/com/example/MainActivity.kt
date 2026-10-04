@@ -336,7 +336,7 @@ fun MainApp(
             }
             WelcomeAuthScreen(
                 isLoading = false,
-                onCreateAccount = { viewModel.createNewAccount() },
+                onCreateAccount = { refCode -> viewModel.createNewAccount(refCode) },
                 onRestoreAccount = { key -> viewModel.loginWithKey(key) }
             )
         }
